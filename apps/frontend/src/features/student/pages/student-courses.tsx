@@ -160,7 +160,7 @@ export function StudentCourses() {
     total: courses.length,
     inProgress: courses.filter((c) => (c.progress?.status || 'in_progress') === 'in_progress').length,
     completed: courses.filter((c) => c.progress?.status === 'completed').length,
-    certificates: courses.filter((c) => c.progress?.status === 'completed').length, // placeholder
+    certificates: courses.filter((c) => c.progress?.status === 'completed').length,
   };
 
   // -----------------------------------------------------------------------
