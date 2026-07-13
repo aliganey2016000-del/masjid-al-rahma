@@ -9,6 +9,8 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import School from '../models/school.model';
+import User from '../models/user.model';
+import Profile from '../models/profile.model';
 import ApiResponse from '../utils/api-response';
 import { BadRequestError, NotFoundError } from '../utils/api-error';
 
@@ -88,6 +90,38 @@ export const create = async (req: Request, res: Response): Promise<Response> => 
   };
 
   const school = await School.create(payload);
+
+  // ── Auto-assign Org_Admin user for this school's principal email ──
+  const schoolEmail = req.body.email as string | undefined;
+  if (schoolEmail) {
+    const existingUser = await User.findOne({ email: schoolEmail.toLowerCase() });
+    if (existingUser) {
+      // Update existing user's role and organizationId
+      existingUser.role = 'org_admin';
+      existingUser.organizationId = school._id;
+      existingUser.isActive = true;
+      existingUser.isVerified = true;
+      await existingUser.save({ validateBeforeSave: false });
+    } else {
+      // Create new org_admin user
+      const orgAdmin = await User.create({
+        email: schoolEmail.toLowerCase(),
+        password: 'ChangeMe@123',
+        role: 'org_admin',
+        organizationId: school._id,
+        isVerified: true,
+        isActive: true,
+        preferredLanguage: 'en',
+      });
+      await Profile.create({
+        user: orgAdmin._id,
+        firstName: req.body.principalName || 'Principal',
+        lastName: '',
+        gender: 'male',
+      });
+    }
+  }
+
   const populated = await School.findById(school._id)
     .populate('createdBy', 'email')
     .lean();

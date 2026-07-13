@@ -83,11 +83,11 @@ export const roleMiddleware = (allowedRoles: AllowedRole[]) => {
 // Convenience Middleware — Pre-configured Role Guards
 // ---------------------------------------------------------------------------
 
-/** Allows only admin users. */
-export const adminOnly = roleMiddleware(['admin']);
+/** Allows only admin and org_admin users. */
+export const adminOnly = roleMiddleware(['admin', 'org_admin']);
 
-/** Allows admin and teacher users. */
-export const adminOrTeacher = roleMiddleware(['admin', 'teacher']);
+/** Allows admin, org_admin, and teacher users. */
+export const adminOrTeacher = roleMiddleware(['admin', 'org_admin', 'teacher']);
 
 /** Allows admin, teacher, and parent users. */
 export const staffAndParents = roleMiddleware(['admin', 'teacher', 'parent']);
