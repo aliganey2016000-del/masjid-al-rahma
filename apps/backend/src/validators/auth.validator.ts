@@ -41,7 +41,7 @@ export const registerSchema = Joi.object({
   }),
   phone: Joi.string().optional().allow('').max(20),
   role: Joi.string()
-    .valid('admin', 'teacher', 'student', 'parent')
+      .valid('admin', 'teacher', 'student', 'parent', 'org_admin')
     .default('student')
     .messages({
       'any.only': 'Invalid role',
