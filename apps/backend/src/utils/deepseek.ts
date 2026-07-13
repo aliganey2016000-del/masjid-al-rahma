@@ -197,9 +197,155 @@ ${countsList}
     throw new InternalServerError('DeepSeek did not return any questions. Please try again.');
   }
 
-  return questions.map((q: any) => ({
-    ...q,
-    explanation: q.explanation || '',
-    points: typeof q.points === 'number' && q.points > 0 ? q.points : 1,
-  }));
+  return questions.map((q: any) => normalizeAiQuestion(q));
+}
+
+// ---------------------------------------------------------------------------
+// AI Question Normalizer — guarantees every question has the correct shape
+// for its type, preventing frontend validation failures at save time.
+// ---------------------------------------------------------------------------
+
+/**
+ * Sanitize and normalize an AI-generated question so every type has all
+ * required fields with sensible defaults. DeepSeek occasionally omits
+ * optional-seeming fields (e.g. options, correctIndex, pairs) or sends them
+ * with the wrong type — this prevents the "Please fill in every question
+ * completely" alert when the admin clicks "Save Changes".
+ */
+function normalizeAiQuestion(raw: any): any {
+  const base = {
+    type: String(raw.type || 'mcq'),
+    question: String(raw.question || ''),
+    explanation: String(raw.explanation || ''),
+    points: typeof raw.points === 'number' && raw.points > 0 ? raw.points : 1,
+  };
+
+  switch (base.type) {
+    case 'mcq': {
+      let options = Array.isArray(raw.options) ? raw.options.map(String) : [];
+      if (options.length < 2) {
+        while (options.length < 2) options.push('');
+      }
+      const correctIndex =
+        typeof raw.correctIndex === 'number' &&
+        raw.correctIndex >= 0 &&
+        raw.correctIndex < options.length
+          ? raw.correctIndex
+          : 0;
+      return { ...base, options, correctIndex };
+    }
+    case 'true_false': {
+      return {
+        ...base,
+        correctAnswer:
+          typeof raw.correctAnswer === 'boolean' ? raw.correctAnswer : true,
+      };
+    }
+    case 'matching': {
+      const pairs = Array.isArray(raw.pairs)
+        ? raw.pairs.map((p: any) => ({
+            left: String(p.left ?? ''),
+            right: String(p.right ?? ''),
+          }))
+        : [];
+      if (pairs.length < 2) {
+        while (pairs.length < 2) pairs.push({ left: '', right: '' });
+      }
+      return { ...base, pairs };
+    }
+    case 'ordering': {
+      const items = Array.isArray(raw.items)
+        ? raw.items.map(String)
+        : [];
+      if (items.length < 2) {
+        while (items.length < 2) items.push('');
+      }
+      return { ...base, items };
+    }
+    case 'picture_choice': {
+      const choices = Array.isArray(raw.choices)
+        ? raw.choices.map((c: any) => ({
+            image: String(c.image ?? ''),
+            label: String(c.label ?? ''),
+          }))
+        : [];
+      if (choices.length < 2) {
+        while (choices.length < 2) choices.push({ image: '', label: '' });
+      }
+      const correctIndex =
+        typeof raw.correctIndex === 'number' &&
+        raw.correctIndex >= 0 &&
+        raw.correctIndex < choices.length
+          ? raw.correctIndex
+          : 0;
+      return { ...base, choices, correctIndex };
+    }
+    case 'swipe_sort': {
+      const cards = Array.isArray(raw.cards)
+        ? raw.cards.map((c: any) => ({
+            text: String(c.text ?? ''),
+            correctSide: c.correctSide === 'right' ? 'right' : 'left',
+          }))
+        : [];
+      if (cards.length < 2) {
+        while (cards.length < 2) cards.push({ text: '', correctSide: 'left' });
+      }
+      return {
+        ...base,
+        leftLabel: String(raw.leftLabel || 'Left'),
+        rightLabel: String(raw.rightLabel || 'Right'),
+        cards,
+      };
+    }
+    case 'listen_write': {
+      return {
+        ...base,
+        audioUrl: String(raw.audioUrl || ''),
+        correctText: String(raw.correctText || ''),
+        hint: String(raw.hint || ''),
+      };
+    }
+    case 'fill_blank': {
+      const blanks = Array.isArray(raw.blanks)
+        ? raw.blanks.map(String)
+        : [];
+      const distractors = Array.isArray(raw.distractors)
+        ? raw.distractors.map(String)
+        : [];
+      return {
+        ...base,
+        textTemplate: String(raw.textTemplate || ''),
+        blanks: blanks.length > 0 ? blanks : [''],
+        distractors,
+      };
+    }
+    case 'word_scramble': {
+      return {
+        ...base,
+        answer: String(raw.answer || ''),
+        hint: String(raw.hint || ''),
+      };
+    }
+    case 'sentence_build': {
+      const words = Array.isArray(raw.words)
+        ? raw.words.map(String)
+        : [];
+      const distractors = Array.isArray(raw.distractors)
+        ? raw.distractors.map(String)
+        : [];
+      if (words.length < 2) {
+        while (words.length < 2) words.push('');
+      }
+      return { ...base, words, distractors };
+    }
+    default: {
+      // Unknown type — default to MCQ
+      return {
+        ...base,
+        type: 'mcq',
+        options: ['', ''],
+        correctIndex: 0,
+      };
+    }
+  }
 }

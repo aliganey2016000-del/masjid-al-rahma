@@ -9,6 +9,7 @@
 import { useMemo, useState } from 'react';
 import api from '../../../../lib/axios';
 import { generateTempId } from '../course-builder.api';
+import { normalizeQuestion } from '../course-builder.types';
 import { QUESTION_TYPE_META, QUESTION_TYPE_ORDER } from '../quiz-question-meta';
 import type { Chapter, LessonItem, QuestionType, QuizQuestion } from '../course-builder.types';
 
@@ -109,7 +110,9 @@ export function AiQuizGeneratorModal({ isOpen, onClose, chapters, onGenerated }:
     setGenerating(true);
     try {
       const { data } = await api.post('/ai/generate-quiz', payload);
-      const generated: QuizQuestion[] = (data.data.questions || []).map((q: any) => ({ ...q, _id: generateTempId() }));
+      const generated: QuizQuestion[] = (data.data.questions || []).map((q: any) =>
+        normalizeQuestion({ ...q, _id: generateTempId() })
+      );
       onGenerated(generated);
       onClose();
     } catch (err: any) {
