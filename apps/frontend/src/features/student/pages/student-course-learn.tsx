@@ -10,7 +10,7 @@
  */
 
 import { useState, useEffect, useCallback, useMemo, useId } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../../lib/axios';
@@ -124,6 +124,7 @@ function formatFileSize(bytes: number): string {
 export function StudentCourseLearn() {
   const { courseId } = useParams<{ courseId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { t, i18n } = useTranslation('common');
   const lang = i18n.language as 'en' | 'so' | 'ar';
 
@@ -207,6 +208,18 @@ export function StudentCourseLearn() {
     });
     return items;
   }, [content]);
+
+  // Honor the startItemIdx passed via navigation state
+  useEffect(() => {
+    const state = location.state as { startItemIdx?: number } | null;
+    if (typeof state?.startItemIdx === 'number' && flatItems.length > 0) {
+      const idx = Math.min(state.startItemIdx, flatItems.length - 1);
+      setActiveItemIdx(idx);
+      setActiveChapterIdx(flatItems[idx]?.chapterIdx || 0);
+    }
+    // Only run once on mount (when flatItems first loads)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flatItems.length > 0]);
 
   const currentItem = flatItems[activeItemIdx] || null;
   const totalItems = flatItems.length;
