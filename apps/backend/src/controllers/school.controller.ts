@@ -106,7 +106,7 @@ export const create = async (req: Request, res: Response): Promise<Response> => 
       // Create new org_admin user
       const orgAdmin = await User.create({
         email: schoolEmail.toLowerCase(),
-        password: 'ChangeMe@123',
+        password: (req.body.phone as string) || 'ChangeMe@123',
         role: 'org_admin',
         organizationId: school._id,
         isVerified: true,
