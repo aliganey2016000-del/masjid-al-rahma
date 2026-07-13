@@ -343,6 +343,7 @@ export const refreshToken = async (req: Request, res: Response): Promise<Respons
       userId: user._id.toString(),
       role: user.role,
       permissions: [],
+      organizationId: user.organizationId?.toString(),
     },
     { userId: user._id.toString(), tokenVersion: user.tokenVersion }
   );

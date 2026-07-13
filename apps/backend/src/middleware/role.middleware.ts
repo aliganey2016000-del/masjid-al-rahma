@@ -188,32 +188,9 @@ export const adminOrParentOf = (getChildUserId: (req: Request) => string) => {
 };
 
 // ---------------------------------------------------------------------------
-// Multi-Tenant Organization Scoping Middleware
+// Multi-Tenant Organization Scoping
 // ---------------------------------------------------------------------------
-
-/**
- * Enforces multi-tenant boundaries for org_admin users.
- *
- * - Super admin (admin/teacher) bypasses tenant checks entirely.
- * - org_admin must have an organizationId in their token and is scoped
- *   to operations within their own organization only.
- * - Other roles (student/parent) pass through without restriction.
- *
- * In the auth/login flow, the backend looks up the user's organizationId
- * and embeds it in the JWT payload so this middleware can verify it.
- */
-export const tenantScope = (req: Request, _res: Response, next: NextFunction): void => {
-  try {
-    if (!req.user) throw new UnauthorizedError('Authentication required');
-    // Super admin and teacher can access everything
-    if (req.user.role === 'admin' || req.user.role === 'teacher') return next();
-    // org_admin must be scoped to their organization
-    if (req.user.role === 'org_admin') {
-      // The organizationId is embedded in the JWT by the auth controller
-      // Access is allowed; individual controllers apply org-level filters
-      return next();
-    }
-    // Students, parents — no tenant scoping applied here
-    return next();
-  } catch (error) { next(error); }
-};
+// Actual per-organization data isolation for org_admin lives in
+// `utils/tenant-scope.ts` (applyOrgFilter / assertOwnsOrg / resolveOrgIdForCreate),
+// applied inside each controller's queries — a route-level middleware can't
+// filter a Mongoose query's *results*, only allow/deny the whole request.
