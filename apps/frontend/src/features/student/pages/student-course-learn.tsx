@@ -140,6 +140,8 @@ export function StudentCourseLearn() {
   const [markingComplete, setMarkingComplete] = useState(false);
   // Track locally which flat-item indices have been marked completed
   const [locallyCompleted, setLocallyCompleted] = useState<Set<number>>(new Set());
+  // Track whether quiz is finished (hide mark-complete during active quiz)
+  const [quizFinished, setQuizFinished] = useState(false);
 
   const getTitle = (c: EnrolledCourse) => {
     if (lang === 'so' && c.title?.so) return c.title.so;
@@ -603,10 +605,11 @@ export function StudentCourseLearn() {
                 <hr className="border-[var(--color-border-default)]" />
 
                 {currentItem.item.type === 'lesson' && <LessonView lesson={currentItem.item as LessonItem} />}
-                {currentItem.item.type === 'quiz' && <QuizView quiz={currentItem.item as QuizItem} />}
+                {currentItem.item.type === 'quiz' && <QuizView quiz={currentItem.item as QuizItem} onComplete={() => setQuizFinished(true)} />}
                 {currentItem.item.type === 'assignment' && <AssignmentView assignment={currentItem.item as AssignmentItem} />}
 
-                {/* ── Mark as Completed Button ── */}
+                {/* ── Mark as Completed Button (hidden during live quiz) ── */}
+                {!(currentItem.item.type === 'quiz' && !quizFinished) && (
                 <div className="pt-2">
                   {isCurrentItemCompleted ? (
                     <div className="flex items-center justify-center gap-2 rounded-2xl bg-green-50 dark:bg-green-950/20 border-2 border-green-300 dark:border-green-700 px-6 py-4 text-green-700 dark:text-green-300">
@@ -633,6 +636,7 @@ export function StudentCourseLearn() {
                     </button>
                   )}
                 </div>
+                )}
 
                 {/* Navigation */}
                 <hr className="border-[var(--color-border-default)]" />
@@ -778,7 +782,7 @@ function LessonView({ lesson }: { lesson: LessonItem }) {
 // ===========================================================================
 // Quiz View — gamified single-question step-by-step for children
 // ===========================================================================
-function QuizView({ quiz }: { quiz: QuizItem }) {
+function QuizView({ quiz, onComplete }: { quiz: QuizItem; onComplete?: () => void }) {
   const [currentQ, setCurrentQ] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState<any>(null);
   const [checked, setChecked] = useState(false);
@@ -830,6 +834,7 @@ function QuizView({ quiz }: { quiz: QuizItem }) {
       setChecked(false);
     } else {
       setFinished(true);
+      onComplete?.();
     }
   };
 
