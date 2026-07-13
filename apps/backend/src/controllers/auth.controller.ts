@@ -191,12 +191,13 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
   user.lockedUntil = undefined;
   user.lastLogin = new Date();
 
-  // 6. Generate token pair
+  // 6. Generate token pair (include organizationId for org_admin)
   const tokenPair = generateTokenPair(
     {
       userId: user._id.toString(),
       role: user.role,
       permissions: [], // Will be populated from Role model in production
+      organizationId: user.organizationId?.toString(),
     },
     { userId: user._id.toString(), tokenVersion: user.tokenVersion }
   );

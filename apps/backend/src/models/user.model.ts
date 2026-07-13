@@ -18,7 +18,8 @@ export interface IUser extends Document {
   email: string;
   phone?: string;
   password: string;
-  role: 'admin' | 'teacher' | 'student' | 'parent';
+  role: 'admin' | 'teacher' | 'student' | 'parent' | 'org_admin';
+  organizationId?: mongoose.Types.ObjectId;
   isVerified: boolean;
   isActive: boolean;
   lastLogin?: Date;
@@ -78,9 +79,15 @@ const userSchema = new Schema<IUser, IUserModel>(
       type: String,
       required: [true, 'Role is required'],
       enum: {
-        values: ['admin', 'teacher', 'student', 'parent'],
+        values: ['admin', 'teacher', 'student', 'parent', 'org_admin'],
         message: '{VALUE} is not a valid role',
       },
+      index: true,
+    },
+    organizationId: {
+      type: Schema.Types.ObjectId,
+      ref: 'School',
+      default: null,
       index: true,
     },
     isVerified: {
