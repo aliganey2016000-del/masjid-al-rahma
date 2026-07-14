@@ -22,6 +22,7 @@ const registerSchema = z.object({
   lastName: z.string().min(1, 'Last name is required'),
   email: z.string().email('Invalid email'),
   gender: z.enum(['male', 'female']).refine((val) => val !== undefined, 'Please select a gender'),
+  organizationId: z.string().optional(),
   password: z.string().min(8, 'Password must be at least 8 characters'),
   confirmPassword: z.string(),
 }).refine((data) => data.password === data.confirmPassword, {
@@ -53,6 +54,7 @@ export function RegisterPage() {
       lastName: '',
       email: '',
       gender: undefined,
+      organizationId: '',
       password: '',
       confirmPassword: '',
     },
@@ -68,6 +70,7 @@ export function RegisterPage() {
         firstName: data.firstName,
         lastName: data.lastName,
         gender: data.gender,
+        organizationId: data.organizationId || undefined,
       });
       // After registration, check role from stored user and redirect
       const token = localStorage.getItem('accessToken');
@@ -171,6 +174,22 @@ export function RegisterPage() {
                 </label>
               </div>
               {errors.gender && <p className="mt-1 text-xs text-red-500">{errors.gender.message}</p>}
+            </div>
+
+            {/* Organization ID (Optional) */}
+            <div>
+              <label htmlFor="organizationId" className="mb-1.5 block text-sm font-medium text-[var(--color-text-primary)]">
+                Organization ID (Optional)
+              </label>
+              <input
+                id="organizationId"
+                type="text"
+                placeholder="e.g. MRPC01"
+                {...register('organizationId')}
+                className="w-full rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-primary)] px-4 py-3 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-tertiary)] focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20 transition-colors"
+              />
+              <p className="mt-1 text-xs text-[var(--color-text-tertiary)]">Have an organization code? Enter it to join that organization (subject to admin approval). Leave blank to join as a general student.</p>
+              {errors.organizationId && <p className="mt-1 text-xs text-red-500">{errors.organizationId.message}</p>}
             </div>
 
             {/* Password */}

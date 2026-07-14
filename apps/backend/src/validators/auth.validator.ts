@@ -40,6 +40,9 @@ export const registerSchema = Joi.object({
     'any.required': 'Gender is required',
   }),
   phone: Joi.string().optional().allow('').max(20),
+  organizationId: Joi.string().optional().allow('').trim().max(50).messages({
+    'string.max': 'Organization ID cannot exceed 50 characters',
+  }),
   preferredLanguage: Joi.string()
     .valid('en', 'so', 'ar')
     .default('en')

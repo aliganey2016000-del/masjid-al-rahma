@@ -44,6 +44,7 @@ interface RegisterData {
   firstName: string;
   lastName: string;
   gender: string;
+  organizationId?: string;
   role?: string;
   preferredLanguage?: string;
 }

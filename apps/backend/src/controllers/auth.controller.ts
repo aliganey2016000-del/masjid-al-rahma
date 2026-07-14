@@ -27,7 +27,7 @@ import ApiResponse from '../utils/api-response';
 // ---------------------------------------------------------------------------
 
 export const register = async (req: Request, res: Response): Promise<Response> => {
-  const { email, password, firstName, lastName, gender, phone, preferredLanguage } = req.body;
+  const { email, password, firstName, lastName, gender, phone, organizationId, preferredLanguage } = req.body;
   // Public self-registration always creates a 'student' account. Elevated
   // roles (admin, teacher, org_admin, parent) are only ever assigned by an
   // authenticated admin action (see teacher/school/parent controllers) —
@@ -65,24 +65,45 @@ export const register = async (req: Request, res: Response): Promise<Response> =
 
   // 4b. Create Student document if role is 'student'
   if (role === 'student') {
-    // Auto-find or create "Public School" and "Public Class" for self-registered students
-    let publicSchool = await School.findOne({ name: 'Public School' });
-    if (!publicSchool) {
-      publicSchool = await School.create({
-        name: 'Public School',
-        address: 'Online',
-        phone: '+000',
-        email: 'public@school.edu',
-        principalName: 'Admin',
-        establishedYear: new Date().getFullYear(),
-        createdBy: user._id,
-      });
+    const trimmedOrgId = typeof organizationId === 'string' ? organizationId.trim() : '';
+
+    let targetSchool;
+    let approvalStatus: 'pending' | 'approved';
+
+    if (trimmedOrgId) {
+      // Case A — joining a specific organization by its Organization ID.
+      // Requires that org's admin (or super admin) to review before the
+      // student gets full access, since they're requesting to join someone
+      // else's tenant.
+      targetSchool = await School.findOne({ orgId: trimmedOrgId });
+      if (!targetSchool) {
+        throw new BadRequestError('No organization found with that Organization ID');
+      }
+      approvalStatus = 'pending';
+    } else {
+      // Case B — no Organization ID given, fall back to the shared public
+      // organization. No admin review needed — auto-approved.
+      targetSchool = await School.findOne({ name: 'Public School' });
+      if (!targetSchool) {
+        targetSchool = await School.create({
+          name: 'Public School',
+          address: 'Online',
+          phone: '+000',
+          email: 'public@school.edu',
+          principalName: 'Admin',
+          establishedYear: new Date().getFullYear(),
+          createdBy: user._id,
+        });
+      }
+      approvalStatus = 'approved';
     }
 
-    let publicClass = await ClassModel.findOne({ school: publicSchool._id, title: 'Public Class' });
+    // Auto-find or create that organization's "Public Class" — the default
+    // holding class new self-registered students land in.
+    let publicClass = await ClassModel.findOne({ school: targetSchool._id, title: 'Public Class' });
     if (!publicClass) {
       publicClass = await ClassModel.create({
-        school: publicSchool._id,
+        school: targetSchool._id,
         title: 'Public Class',
         section: 'A',
         room: 'Online',
@@ -93,8 +114,8 @@ export const register = async (req: Request, res: Response): Promise<Response> =
       user: user._id,
       profile: (await Profile.findOne({ user: user._id }))!._id,
       enrollmentDate: new Date(),
-      approvalStatus: 'pending',
-      school: publicSchool._id,
+      approvalStatus,
+      school: targetSchool._id,
       class: publicClass._id,
     });
 
