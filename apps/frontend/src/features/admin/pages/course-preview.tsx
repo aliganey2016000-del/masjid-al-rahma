@@ -41,6 +41,8 @@ interface CourseInfo {
   thumbnail?: string;
   teacher?: TeacherBrief | null;
   startDate?: string;
+  meetingLink?: string;
+  isLive?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -433,6 +435,17 @@ export function CoursePreview() {
         >
           ← Courses
         </button>
+        {course?.isLive && course.meetingLink && (
+          <a
+            href={course.meetingLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 rounded-lg bg-red-600 px-2.5 py-0.5 text-xs font-bold text-white hover:bg-red-700 transition-colors"
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-white" />
+            Join Live ↗
+          </a>
+        )}
       </div>
 
       {/* ── Desktop + Mobile Layout ── */}

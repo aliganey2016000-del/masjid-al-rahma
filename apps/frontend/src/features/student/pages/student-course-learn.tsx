@@ -53,6 +53,8 @@ interface EnrolledCourse {
   thumbnail?: string;
   status: string;
   progress: Progress;
+  meetingLink?: string;
+  isLive?: boolean;
 }
 
 interface CourseContent {
@@ -335,6 +337,19 @@ export function StudentCourseLearn() {
           <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
         </svg>
       </button>
+
+      {/* ── Join Live (Google Meet) — shown whenever the teacher has gone live ── */}
+      {course?.isLive && course.meetingLink && (
+        <a
+          href={course.meetingLink}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="fixed top-3 end-3 z-[60] flex items-center gap-1.5 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg hover:bg-red-700 transition-colors animate-pulse"
+        >
+          <span className="h-2 w-2 rounded-full bg-white" />
+          Join Live ↗
+        </a>
+      )}
 
       <div className="flex">
         {/* ================================================================ */}

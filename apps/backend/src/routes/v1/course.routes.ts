@@ -11,6 +11,7 @@
  *   GET  /:id/admin        — Get any course by ID
  *   POST /                 — Create course
  *   PATCH /:id             — Update course
+ *   PATCH /:id/live        — Start/end live Google Meet session
  *   DELETE /:id            — Delete course
  *   POST /:id/enroll       — Enroll student
  *   POST /:id/unenroll     — Unenroll student
@@ -80,6 +81,15 @@ router.delete(
   authMiddleware,
   adminOnly,
   asyncHandler(courseController.remove)
+);
+
+// PATCH /api/v1/courses/:id/live — Start/end this course's live Google Meet
+// session (admin/org_admin, or the course's own assigned teacher)
+router.patch(
+  '/:id/live',
+  authMiddleware,
+  roleMiddleware(['admin', 'org_admin', 'teacher']),
+  asyncHandler(courseController.toggleLive)
 );
 
 // GET /api/v1/courses/:id/students — Get enrolled students (admin/teacher)

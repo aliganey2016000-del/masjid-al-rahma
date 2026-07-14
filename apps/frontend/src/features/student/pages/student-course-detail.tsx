@@ -33,6 +33,7 @@ interface Course {
   category: string; level: string; duration: number; fee: number;
   teacher?: TeacherBrief; maxStudents: number; enrolledStudents: number;
   thumbnail?: string; status: string; progress: Progress;
+  meetingLink?: string; isLive?: boolean;
 }
 interface CourseContent {
   _id?: string; course: string; chapters: Chapter[];
@@ -132,10 +133,23 @@ export function StudentCourseDetail() {
               <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${levelColors[course.level] || ''}`}>{levelLabels[course.level] || course.level}</span>
             </div>
           </div>
-          {/* ── View Toggle ── */}
-          <div className="flex rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-primary)] p-1 gap-0.5 shadow-sm">
-            <button onClick={() => setView('map')} className={`rounded-lg px-4 py-2 text-sm font-bold transition-colors ${view==='map'?'bg-primary-600 text-white shadow-sm':'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-tertiary)]'}`}>🗺️ Map</button>
-            <button onClick={() => setView('list')} className={`rounded-lg px-4 py-2 text-sm font-bold transition-colors ${view==='list'?'bg-primary-600 text-white shadow-sm':'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-tertiary)]'}`}>📋 List</button>
+          <div className="flex items-center gap-2">
+            {course.isLive && course.meetingLink && (
+              <a
+                href={course.meetingLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-red-700 transition-colors animate-pulse"
+              >
+                <span className="h-2 w-2 rounded-full bg-white" />
+                Join Live ↗
+              </a>
+            )}
+            {/* ── View Toggle ── */}
+            <div className="flex rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-primary)] p-1 gap-0.5 shadow-sm">
+              <button onClick={() => setView('map')} className={`rounded-lg px-4 py-2 text-sm font-bold transition-colors ${view==='map'?'bg-primary-600 text-white shadow-sm':'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-tertiary)]'}`}>🗺️ Map</button>
+              <button onClick={() => setView('list')} className={`rounded-lg px-4 py-2 text-sm font-bold transition-colors ${view==='list'?'bg-primary-600 text-white shadow-sm':'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-tertiary)]'}`}>📋 List</button>
+            </div>
           </div>
         </div>
 

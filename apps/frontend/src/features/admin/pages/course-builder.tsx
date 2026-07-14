@@ -6,9 +6,10 @@
  * responsive dark mode.
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import api from '../../../lib/axios';
 import { useCourseContent, useAutoSave, generateTempId } from './course-builder.api';
 import { AssignmentEditor } from './components/builder-assignment-editor';
 import type {
@@ -93,6 +94,57 @@ export function CourseBuilder() {
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
+  };
+
+  // -----------------------------------------------------------------------
+  // Live Session (Google Meet)
+  // -----------------------------------------------------------------------
+  const [meetingLink, setMeetingLink] = useState('');
+  const [isLive, setIsLive] = useState(false);
+  const [savingMeetingLink, setSavingMeetingLink] = useState(false);
+  const [togglingLive, setTogglingLive] = useState(false);
+
+  useEffect(() => {
+    if (!courseId) return;
+    (async () => {
+      try {
+        const { data } = await api.get(`/courses/${courseId}/admin`);
+        setMeetingLink(data.data?.meetingLink || '');
+        setIsLive(!!data.data?.isLive);
+      } catch {
+        // Non-fatal — the rest of the builder still works without it.
+      }
+    })();
+  }, [courseId]);
+
+  const handleSaveMeetingLink = async () => {
+    setSavingMeetingLink(true);
+    try {
+      await api.patch(`/courses/${courseId}`, { meetingLink: meetingLink.trim() });
+      showToast('Meeting link saved', 'success');
+    } catch (err: any) {
+      showToast(err.response?.data?.message || 'Failed to save meeting link', 'error');
+    } finally {
+      setSavingMeetingLink(false);
+    }
+  };
+
+  const handleToggleLive = async () => {
+    const nextIsLive = !isLive;
+    if (nextIsLive && !meetingLink.trim()) {
+      showToast('Add a Google Meet link before going live', 'error');
+      return;
+    }
+    setTogglingLive(true);
+    try {
+      await api.patch(`/courses/${courseId}/live`, { isLive: nextIsLive });
+      setIsLive(nextIsLive);
+      showToast(nextIsLive ? '🔴 Course is now live' : 'Live session ended', 'success');
+    } catch (err: any) {
+      showToast(err.response?.data?.message || 'Failed to update live status', 'error');
+    } finally {
+      setTogglingLive(false);
+    }
   };
 
   // -----------------------------------------------------------------------
@@ -500,6 +552,63 @@ export function CourseBuilder() {
               💾 Save Now
             </button>
           </div>
+        </motion.div>
+
+        {/* ── Live Session (Google Meet) ── */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="rounded-2xl border border-[var(--color-border-default)] bg-[var(--color-surface-primary)] p-4"
+        >
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-bold text-[var(--color-text-primary)] flex items-center gap-2">
+              🎥 Live Session
+            </h2>
+            <div className="flex items-center gap-2">
+              <span className={`text-xs font-semibold ${isLive ? 'text-red-600 dark:text-red-400' : 'text-[var(--color-text-tertiary)]'}`}>
+                {isLive ? '🔴 Live' : 'Offline'}
+              </span>
+              <button
+                type="button"
+                onClick={handleToggleLive}
+                disabled={togglingLive}
+                aria-pressed={isLive}
+                className={`relative h-6 w-11 rounded-full transition-colors disabled:opacity-50 ${isLive ? 'bg-red-600' : 'bg-[var(--color-border-default)]'}`}
+              >
+                <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${isLive ? 'translate-x-5' : 'translate-x-0.5'}`} />
+              </button>
+            </div>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              type="url"
+              value={meetingLink}
+              onChange={(e) => setMeetingLink(e.target.value)}
+              placeholder="https://meet.google.com/xxx-xxxx-xxx"
+              className="flex-1 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-primary)] px-3 py-2 text-sm"
+            />
+            <button
+              type="button"
+              onClick={handleSaveMeetingLink}
+              disabled={savingMeetingLink}
+              className="rounded-xl border border-[var(--color-border-default)] px-4 py-2 text-sm font-medium hover:bg-[var(--color-surface-tertiary)] transition-colors disabled:opacity-50"
+            >
+              {savingMeetingLink ? 'Saving...' : 'Save Link'}
+            </button>
+            {meetingLink && (
+              <a
+                href={meetingLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white text-center hover:bg-primary-700 transition-colors"
+              >
+                Open Meet ↗
+              </a>
+            )}
+          </div>
+          <p className="text-xs text-[var(--color-text-tertiary)] mt-2">
+            Paste a Google Meet link, then toggle "Live" when the session starts — students and admin will see a "Join Live" button on this course.
+          </p>
         </motion.div>
 
         {/* ── Stats Cards ── */}

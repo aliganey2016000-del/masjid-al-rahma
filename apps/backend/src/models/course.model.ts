@@ -54,6 +54,8 @@ export interface ICourse extends Document {
   status: 'draft' | 'published' | 'archived';
   startDate?: Date;
   endDate?: Date;
+  meetingLink?: string;          // Google Meet URL for this course's live sessions
+  isLive: boolean;               // Toggled by the teacher — shows "Join Live" to students when true
   createdAt: Date;
   updatedAt: Date;
 }
@@ -200,6 +202,15 @@ const courseSchema = new Schema<ICourse>(
     endDate: {
       type: Date,
       default: null,
+    },
+    meetingLink: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    isLive: {
+      type: Boolean,
+      default: false,
     },
   },
   {

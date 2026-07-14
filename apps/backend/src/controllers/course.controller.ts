@@ -8,8 +8,8 @@ import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import Course from '../models/course.model';
 import Student from '../models/student.model';
-import '../models/teacher.model'; // Register Teacher model for population
-import { BadRequestError, NotFoundError, ConflictError } from '../utils/api-error';
+import Teacher from '../models/teacher.model';
+import { BadRequestError, NotFoundError, ConflictError, ForbiddenError } from '../utils/api-error';
 import ApiResponse from '../utils/api-response';
 import ensureStudentRecord from '../utils/ensure-student';
 import { applyOrgFilter, assertOwnsOrg, resolveOrgIdForCreate } from '../utils/tenant-scope';
@@ -198,7 +198,7 @@ export const update = async (req: Request, res: Response): Promise<Response> => 
   const allowedUpdates = [
     'title', 'description', 'category', 'level', 'duration',
     'fee', 'teacher', 'school', 'class', 'maxStudents', 'syllabus', 'prerequisites', 'status',
-    'startDate', 'endDate', 'thumbnail',
+    'startDate', 'endDate', 'thumbnail', 'meetingLink',
   ];
 
   const updates: Record<string, unknown> = {};
@@ -239,6 +239,42 @@ export const update = async (req: Request, res: Response): Promise<Response> => 
     .lean();
 
   return ApiResponse.success(res, populated, 'Course updated successfully');
+};
+
+// ---------------------------------------------------------------------------
+// Toggle Live — Start/end this course's Google Meet session
+// (Admin/org_admin, or the course's own assigned teacher)
+// ---------------------------------------------------------------------------
+
+export const toggleLive = async (req: Request, res: Response): Promise<Response> => {
+  const course = await Course.findById(req.params.id);
+  if (!course) throw new NotFoundError('Course');
+  assertOwnsOrg(req, course, 'school');
+
+  if (req.user?.role === 'teacher') {
+    const teacher = await Teacher.findOne({ user: req.user.userId });
+    if (!teacher || course.teacher?.toString() !== teacher._id.toString()) {
+      throw new ForbiddenError('You can only go live for your own course');
+    }
+  }
+
+  const { isLive } = req.body;
+  if (typeof isLive !== 'boolean') {
+    throw new BadRequestError('isLive must be true or false');
+  }
+
+  if (isLive && !course.meetingLink) {
+    throw new BadRequestError('Add a Google Meet link to this course before going live');
+  }
+
+  course.isLive = isLive;
+  await course.save();
+
+  return ApiResponse.success(
+    res,
+    { isLive: course.isLive },
+    isLive ? 'Course is now live' : 'Live session ended'
+  );
 };
 
 // ---------------------------------------------------------------------------
