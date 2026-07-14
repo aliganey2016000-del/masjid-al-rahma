@@ -19,6 +19,7 @@ import { useAuth } from '../../../store/auth-context';
 interface School {
   _id: string;
   name: string;
+  orgId?: string;
   address: string;
   phone: string;
   email: string;
@@ -33,6 +34,7 @@ interface School {
 
 interface SchoolFormData {
   name: string;
+  orgId: string;
   address: string;
   phone: string;
   email: string;
@@ -52,6 +54,7 @@ type ToastType = 'success' | 'error' | null;
 
 const INITIAL_FORM: SchoolFormData = {
   name: '',
+  orgId: '',
   address: '',
   phone: '',
   email: '',
@@ -316,6 +319,7 @@ export function SchoolsManage() {
     setEditingSchool(school);
     setForm({
       name: school.name,
+      orgId: school.orgId || '',
       address: school.address,
       phone: school.phone,
       email: school.email,
@@ -603,6 +607,7 @@ export function SchoolsManage() {
             {/* Modal Body */}
             <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4 max-h-[70vh] overflow-y-auto">
               <FormInput label="Organization Name" name="name" value={form.name} error={formErrors.name} onChange={handleChange} placeholder="e.g., Al-Huda International" required maxLength={200} />
+              <FormInput label="Organization ID" name="orgId" value={form.orgId} error={formErrors.orgId} onChange={handleChange} placeholder="e.g., ORG-101 or school code (optional)" maxLength={50} />
               <FormInput label="Address" name="address" value={form.address} error={formErrors.address} onChange={handleChange} placeholder="Full organization address" required maxLength={500} />
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <FormInput label="Phone" name="phone" type="tel" value={form.phone} error={formErrors.phone} onChange={handleChange} placeholder="+252 61 2345678" required />

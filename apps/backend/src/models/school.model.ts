@@ -14,6 +14,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ISchool extends Document {
   name: string;
+  orgId?: string;
   address: string;
   phone: string;
   email: string;
@@ -37,6 +38,14 @@ const schoolSchema = new Schema<ISchool>(
       required: [true, 'School name is required'],
       trim: true,
       maxlength: [200, 'School name cannot exceed 200 characters'],
+    },
+    orgId: {
+      type: String,
+      default: '',
+      trim: true,
+      maxlength: [50, 'Organization ID cannot exceed 50 characters'],
+      sparse: true,
+      index: true,
     },
     address: {
       type: String,
