@@ -22,4 +22,5 @@ export declare const bulkImport: (_req: Request, _res: Response) => Promise<Resp
 export declare const exportStudents: (_req: Request, _res: Response) => Promise<Response>;
 export declare const approve: (req: Request, res: Response) => Promise<Response>;
 export declare const reject: (req: Request, res: Response) => Promise<Response>;
+export declare const recordProgress: (req: Request, res: Response) => Promise<Response>;
 //# sourceMappingURL=student.controller.d.ts.map

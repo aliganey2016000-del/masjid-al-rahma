@@ -44,7 +44,7 @@ exports.registerSchema = joi_1.default.object({
     }),
     phone: joi_1.default.string().optional().allow('').max(20),
     role: joi_1.default.string()
-        .valid('admin', 'teacher', 'student', 'parent')
+        .valid('admin', 'teacher', 'student', 'parent', 'org_admin')
         .default('student')
         .messages({
         'any.only': 'Invalid role',

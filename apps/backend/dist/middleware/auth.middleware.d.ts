@@ -16,6 +16,7 @@ declare global {
                 userId: string;
                 role: string;
                 permissions: string[];
+                organizationId?: string;
             };
         }
     }

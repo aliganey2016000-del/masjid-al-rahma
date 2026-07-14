@@ -1,0 +1,1 @@
+function e(n){var t;return n&&n.type?n:{...n,type:"mcq",options:((t=n==null?void 0:n.options)==null?void 0:t.length)>=2?n.options:["",""],correctIndex:(n==null?void 0:n.correctIndex)??0}}export{e as n};

@@ -10,7 +10,8 @@ export interface IUser extends Document {
     email: string;
     phone?: string;
     password: string;
-    role: 'admin' | 'teacher' | 'student' | 'parent';
+    role: 'admin' | 'teacher' | 'student' | 'parent' | 'org_admin';
+    organizationId?: mongoose.Types.ObjectId;
     isVerified: boolean;
     isActive: boolean;
     lastLogin?: Date;

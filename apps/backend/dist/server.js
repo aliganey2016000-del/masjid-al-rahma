@@ -3,6 +3,21 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+const path_1 = __importDefault(require("path"));
+const fs_1 = __importDefault(require("fs"));
+const dotenv_1 = __importDefault(require("dotenv"));
+// Load environment variables before anything else touches process.env.
+//
+// backend/.env.production holds real VPS values (a Docker-internal Mongo
+// URI, the VPS's public IP as CLIENT_URL, etc.) — loading it on a local
+// dev machine breaks the DB connection and CORS. So: prefer a local-only
+// backend/.env (gitignored, create it yourself with just the values you
+// need to override locally, e.g. DEEPSEEK_API_KEY) and only fall back to
+// .env.production if no local .env exists — e.g. when actually running
+// on the VPS.
+const localEnvPath = path_1.default.resolve(__dirname, '../.env');
+const prodEnvPath = path_1.default.resolve(__dirname, '../.env.production');
+dotenv_1.default.config({ path: fs_1.default.existsSync(localEnvPath) ? localEnvPath : prodEnvPath });
 const mongoose_1 = __importDefault(require("mongoose"));
 // Register all models before routes are loaded
 require("./models/announcement.model");

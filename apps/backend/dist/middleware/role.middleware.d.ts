@@ -9,7 +9,7 @@
  *   router.get('/shared', authMiddleware, roleMiddleware(['admin', 'teacher']), handler);
  */
 import { Request, Response, NextFunction } from 'express';
-export type AllowedRole = 'admin' | 'teacher' | 'student' | 'parent';
+export type AllowedRole = 'admin' | 'teacher' | 'student' | 'parent' | 'org_admin';
 /**
  * Returns a middleware function that checks whether the authenticated user's
  * role is included in the allowed roles list.
@@ -30,9 +30,9 @@ export type AllowedRole = 'admin' | 'teacher' | 'student' | 'parent';
  *   roleMiddleware(['admin', 'teacher', 'student', 'parent'])
  */
 export declare const roleMiddleware: (allowedRoles: AllowedRole[]) => (req: Request, _res: Response, next: NextFunction) => void;
-/** Allows only admin users. */
+/** Allows only admin and org_admin users. */
 export declare const adminOnly: (req: Request, _res: Response, next: NextFunction) => void;
-/** Allows admin and teacher users. */
+/** Allows admin, org_admin, and teacher users. */
 export declare const adminOrTeacher: (req: Request, _res: Response, next: NextFunction) => void;
 /** Allows admin, teacher, and parent users. */
 export declare const staffAndParents: (req: Request, _res: Response, next: NextFunction) => void;

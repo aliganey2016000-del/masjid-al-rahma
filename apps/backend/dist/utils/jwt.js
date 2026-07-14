@@ -50,6 +50,7 @@ function verifyAccessToken(token) {
             userId: decoded.userId,
             role: decoded.role,
             permissions: decoded.permissions || [],
+            organizationId: decoded.organizationId,
         };
     }
     catch (error) {

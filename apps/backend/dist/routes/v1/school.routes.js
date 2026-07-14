@@ -47,13 +47,16 @@ const async_handler_middleware_1 = require("../../middleware/async-handler.middl
 const router = (0, express_1.Router)();
 // All routes require authentication
 router.use(auth_middleware_1.authMiddleware);
-// ── Read (admin or teacher) ──
+// ── Read (admin, org_admin, or teacher — results scoped to own org inside the controller for org_admin) ──
 router.get('/', role_middleware_1.adminOrTeacher, (0, async_handler_middleware_1.asyncHandler)(ctrl.getAll));
 router.get('/:id', role_middleware_1.adminOrTeacher, (0, async_handler_middleware_1.asyncHandler)(ctrl.getById));
-// ── Write (admin only) ──
-router.post('/', role_middleware_1.adminOnly, (0, async_handler_middleware_1.asyncHandler)(ctrl.create));
+// ── Update own org info (admin, or org_admin for their own organization only) ──
 router.patch('/:id', role_middleware_1.adminOnly, (0, async_handler_middleware_1.asyncHandler)(ctrl.update));
-router.patch('/:id/status', role_middleware_1.adminOnly, (0, async_handler_middleware_1.asyncHandler)(ctrl.updateStatus));
-router.delete('/:id', role_middleware_1.adminOnly, (0, async_handler_middleware_1.asyncHandler)(ctrl.remove));
+// ── Registering new organizations, activation/deactivation, and deletion are
+//    super-admin only — an org_admin must never create another tenant,
+//    suspend their own org, or delete organizations. ──
+router.post('/', (0, role_middleware_1.roleMiddleware)(['admin']), (0, async_handler_middleware_1.asyncHandler)(ctrl.create));
+router.patch('/:id/status', (0, role_middleware_1.roleMiddleware)(['admin']), (0, async_handler_middleware_1.asyncHandler)(ctrl.updateStatus));
+router.delete('/:id', (0, role_middleware_1.roleMiddleware)(['admin']), (0, async_handler_middleware_1.asyncHandler)(ctrl.remove));
 exports.default = router;
 //# sourceMappingURL=school.routes.js.map

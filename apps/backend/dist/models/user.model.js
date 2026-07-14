@@ -67,16 +67,22 @@ const userSchema = new mongoose_1.Schema({
     password: {
         type: String,
         required: [true, 'Password is required'],
-        minlength: [8, 'Password must be at least 8 characters'],
+        minlength: [1, 'Password is required'],
         select: false, // never returned in queries by default
     },
     role: {
         type: String,
         required: [true, 'Role is required'],
         enum: {
-            values: ['admin', 'teacher', 'student', 'parent'],
+            values: ['admin', 'teacher', 'student', 'parent', 'org_admin'],
             message: '{VALUE} is not a valid role',
         },
+        index: true,
+    },
+    organizationId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: 'School',
+        default: null,
         index: true,
     },
     isVerified: {
@@ -151,13 +157,7 @@ const userSchema = new mongoose_1.Schema({
         },
     },
 });
-// ---------------------------------------------------------------------------
-// Indexes
-// ---------------------------------------------------------------------------
-userSchema.index({ email: 1 }, { unique: true, sparse: true });
-userSchema.index({ phone: 1 }, { unique: true, sparse: true });
-userSchema.index({ role: 1 });
-userSchema.index({ isActive: 1 });
+// (Indexes are declared inline on the schema fields above — email, phone, role, isActive)
 // ---------------------------------------------------------------------------
 // Pre-save Hook — Hash password & email verification token
 // ---------------------------------------------------------------------------

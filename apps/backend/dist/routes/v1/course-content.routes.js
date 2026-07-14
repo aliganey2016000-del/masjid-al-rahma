@@ -42,11 +42,13 @@ const auth_middleware_1 = require("../../middleware/auth.middleware");
 const role_middleware_1 = require("../../middleware/role.middleware");
 const async_handler_middleware_1 = require("../../middleware/async-handler.middleware");
 const router = (0, express_1.Router)({ mergeParams: true });
-// All routes require auth + admin/teacher
+// All routes require authentication
 router.use(auth_middleware_1.authMiddleware);
-router.use(role_middleware_1.adminOrTeacher);
+// ── Read: accessible to all authenticated users (admin, teacher, student, parent) ──
 // GET /api/v1/courses/:courseId/content
 router.get('/', (0, async_handler_middleware_1.asyncHandler)(contentController.getByCourse));
+// ── Write: restricted to admin and teacher ──
+router.use(role_middleware_1.adminOrTeacher);
 // PUT /api/v1/courses/:courseId/content — full save / upsert
 router.put('/', (0, async_handler_middleware_1.asyncHandler)(contentController.saveContent));
 // PATCH /api/v1/courses/:courseId/content/chapters/reorder

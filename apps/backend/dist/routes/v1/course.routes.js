@@ -67,14 +67,14 @@ router.get('/categories', (0, async_handler_middleware_1.asyncHandler)(courseCon
 router.get('/admin', auth_middleware_1.authMiddleware, role_middleware_1.adminOrTeacher, (0, async_handler_middleware_1.asyncHandler)(courseController.getAllAdmin));
 // GET /api/v1/courses — List published courses (with filtering)
 router.get('/', (0, async_handler_middleware_1.asyncHandler)(courseController.getAllPublic));
-// POST /api/v1/courses — Create course (admin only)
-router.post('/', auth_middleware_1.authMiddleware, (0, role_middleware_1.roleMiddleware)(['admin']), (0, async_handler_middleware_1.asyncHandler)(courseController.create));
+// POST /api/v1/courses — Create course (admin or org_admin — scoped to own org)
+router.post('/', auth_middleware_1.authMiddleware, role_middleware_1.adminOnly, (0, async_handler_middleware_1.asyncHandler)(courseController.create));
 // GET /api/v1/courses/:id/admin — Get course by ID (admin/teacher)
 router.get('/:id/admin', auth_middleware_1.authMiddleware, role_middleware_1.adminOrTeacher, (0, async_handler_middleware_1.asyncHandler)(courseController.getByIdAdmin));
-// PATCH /api/v1/courses/:id — Update course (admin only)
-router.patch('/:id', auth_middleware_1.authMiddleware, (0, role_middleware_1.roleMiddleware)(['admin']), (0, async_handler_middleware_1.asyncHandler)(courseController.update));
-// DELETE /api/v1/courses/:id — Delete course (admin only)
-router.delete('/:id', auth_middleware_1.authMiddleware, (0, role_middleware_1.roleMiddleware)(['admin']), (0, async_handler_middleware_1.asyncHandler)(courseController.remove));
+// PATCH /api/v1/courses/:id — Update course (admin or org_admin — scoped to own org)
+router.patch('/:id', auth_middleware_1.authMiddleware, role_middleware_1.adminOnly, (0, async_handler_middleware_1.asyncHandler)(courseController.update));
+// DELETE /api/v1/courses/:id — Delete course (admin or org_admin — scoped to own org)
+router.delete('/:id', auth_middleware_1.authMiddleware, role_middleware_1.adminOnly, (0, async_handler_middleware_1.asyncHandler)(courseController.remove));
 // GET /api/v1/courses/:id/students — Get enrolled students (admin/teacher)
 router.get('/:id/students', auth_middleware_1.authMiddleware, role_middleware_1.adminOrTeacher, (0, async_handler_middleware_1.asyncHandler)(courseController.getEnrolledStudents));
 // POST /api/v1/courses/:courseId/enroll — Enroll student (admin only)

@@ -14,6 +14,7 @@ const profile_model_1 = __importDefault(require("../models/profile.model"));
 const api_response_1 = __importDefault(require("../utils/api-response"));
 const api_error_1 = require("../utils/api-error");
 const student_model_1 = __importDefault(require("../models/student.model"));
+const tenant_scope_1 = require("../utils/tenant-scope");
 // ---------------------------------------------------------------------------
 // GET /parents — List all with optional filters
 // ---------------------------------------------------------------------------
@@ -25,8 +26,9 @@ const getAll = async (req, res) => {
     }
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
     const limitNum = Math.max(1, Math.min(100, parseInt(limit, 10) || 10));
+    const scopedFilter = (0, tenant_scope_1.applyOrgFilter)(req, filter, 'school');
     const [parents, total] = await Promise.all([
-        parent_model_1.default.find(filter)
+        parent_model_1.default.find(scopedFilter)
             .populate('user', 'email isVerified isActive')
             .populate('profile', 'firstName lastName gender')
             .populate('children', 'studentId')
@@ -34,7 +36,7 @@ const getAll = async (req, res) => {
             .skip((pageNum - 1) * limitNum)
             .limit(limitNum)
             .lean(),
-        parent_model_1.default.countDocuments(filter),
+        parent_model_1.default.countDocuments(scopedFilter),
     ]);
     let result = parents;
     if (search) {
@@ -63,6 +65,7 @@ const getById = async (req, res) => {
         .populate('children', 'studentId');
     if (!parent)
         throw new api_error_1.NotFoundError('Parent');
+    (0, tenant_scope_1.assertOwnsOrg)(req, parent, 'school');
     return api_response_1.default.success(res, parent);
 };
 exports.getById = getById;
@@ -92,6 +95,7 @@ const create = async (req, res) => {
         user: user._id,
         profile: profile._id,
         parentId,
+        school: (0, tenant_scope_1.resolveOrgIdForCreate)(req, req.body.school) || undefined,
         occupation: occupation || '',
         relationship: relationship || 'father',
         address: address || '',
@@ -111,6 +115,7 @@ const update = async (req, res) => {
     const parent = await parent_model_1.default.findById(req.params.id);
     if (!parent)
         throw new api_error_1.NotFoundError('Parent');
+    (0, tenant_scope_1.assertOwnsOrg)(req, parent, 'school');
     const { firstName, lastName, gender, occupation, relationship, address, status } = req.body;
     if (firstName || lastName || gender) {
         const profileUpdate = {};
@@ -145,6 +150,7 @@ const remove = async (req, res) => {
     const parent = await parent_model_1.default.findById(req.params.id);
     if (!parent)
         throw new api_error_1.NotFoundError('Parent');
+    (0, tenant_scope_1.assertOwnsOrg)(req, parent, 'school');
     // Unlink children
     if (parent.children.length > 0) {
         await student_model_1.default.updateMany({ _id: { $in: parent.children } }, { $unset: { parent: '' } });
@@ -165,6 +171,10 @@ const updateStatus = async (req, res) => {
     if (!status || !['active', 'inactive'].includes(status)) {
         throw new api_error_1.BadRequestError('Valid status required: active or inactive');
     }
+    const existing = await parent_model_1.default.findById(req.params.id);
+    if (!existing)
+        throw new api_error_1.NotFoundError('Parent');
+    (0, tenant_scope_1.assertOwnsOrg)(req, existing, 'school');
     const parent = await parent_model_1.default.findByIdAndUpdate(req.params.id, { status }, { new: true }).populate('profile', 'firstName lastName');
     if (!parent)
         throw new api_error_1.NotFoundError('Parent');
@@ -187,6 +197,7 @@ const getChildren = async (req, res) => {
         .lean();
     if (!parent)
         throw new api_error_1.NotFoundError('Parent');
+    (0, tenant_scope_1.assertOwnsOrg)(req, parent, 'school');
     return api_response_1.default.success(res, parent.children || []);
 };
 exports.getChildren = getChildren;
@@ -200,9 +211,11 @@ const linkChild = async (req, res) => {
     const student = await student_model_1.default.findById(childId);
     if (!student)
         throw new api_error_1.NotFoundError('Student');
+    (0, tenant_scope_1.assertOwnsOrg)(req, student, 'school');
     const parent = await parent_model_1.default.findById(req.params.id);
     if (!parent)
         throw new api_error_1.NotFoundError('Parent');
+    (0, tenant_scope_1.assertOwnsOrg)(req, parent, 'school');
     // Add child if not already linked
     if (!parent.children.includes(childId)) {
         parent.children.push(childId);
@@ -228,6 +241,7 @@ const unlinkChild = async (req, res) => {
     const parent = await parent_model_1.default.findById(req.params.id);
     if (!parent)
         throw new api_error_1.NotFoundError('Parent');
+    (0, tenant_scope_1.assertOwnsOrg)(req, parent, 'school');
     parent.children = parent.children.filter((c) => c.toString() !== childId);
     await parent.save();
     await student_model_1.default.findByIdAndUpdate(childId, { $unset: { parent: '' } });

@@ -29,6 +29,7 @@ const content_routes_1 = __importDefault(require("./content.routes"));
 const system_routes_1 = __importDefault(require("./system.routes"));
 const school_routes_1 = __importDefault(require("./school.routes"));
 const course_content_routes_1 = __importDefault(require("./course-content.routes"));
+const ai_routes_1 = __importDefault(require("./ai.routes"));
 const router = (0, express_1.Router)();
 // ---------------------------------------------------------------------------
 // Mount resource routes
@@ -55,6 +56,7 @@ router.use('/gallery', (0, content_routes_1.default)('Gallery'));
 router.use('/system', system_routes_1.default);
 router.use('/schools', school_routes_1.default);
 router.use('/courses/:courseId/content', course_content_routes_1.default);
+router.use('/ai', ai_routes_1.default);
 // Future routes (to be implemented):
 // router.use('/users', userRoutes);
 // router.use('/parents', parentRoutes);

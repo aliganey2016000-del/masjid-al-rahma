@@ -153,11 +153,12 @@ const login = async (req, res) => {
     user.failedLoginAttempts = 0;
     user.lockedUntil = undefined;
     user.lastLogin = new Date();
-    // 6. Generate token pair
+    // 6. Generate token pair (include organizationId for org_admin)
     const tokenPair = (0, jwt_1.generateTokenPair)({
         userId: user._id.toString(),
         role: user.role,
         permissions: [], // Will be populated from Role model in production
+        organizationId: user.organizationId?.toString(),
     }, { userId: user._id.toString(), tokenVersion: user.tokenVersion });
     // 7. Store hashed refresh token
     const hashedRefreshToken = user_model_1.default.hashToken(tokenPair.refreshToken);
@@ -266,6 +267,7 @@ const refreshToken = async (req, res) => {
         userId: user._id.toString(),
         role: user.role,
         permissions: [],
+        organizationId: user.organizationId?.toString(),
     }, { userId: user._id.toString(), tokenVersion: user.tokenVersion });
     const hashedNewToken = user_model_1.default.hashToken(newTokenPair.refreshToken);
     user.refreshTokens.push(hashedNewToken);

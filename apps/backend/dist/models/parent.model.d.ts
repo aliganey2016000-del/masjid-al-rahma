@@ -4,6 +4,7 @@ export interface IParent extends Document {
     profile: mongoose.Types.ObjectId;
     parentId: string;
     children: mongoose.Types.ObjectId[];
+    school?: mongoose.Types.ObjectId;
     occupation?: string;
     relationship: string;
     address?: string;

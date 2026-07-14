@@ -14,6 +14,7 @@ const user_model_1 = __importDefault(require("../models/user.model"));
 const profile_model_1 = __importDefault(require("../models/profile.model"));
 const api_response_1 = __importDefault(require("../utils/api-response"));
 const api_error_1 = require("../utils/api-error");
+const tenant_scope_1 = require("../utils/tenant-scope");
 // ---------------------------------------------------------------------------
 // GET /teachers — List all teachers with optional filters
 // ---------------------------------------------------------------------------
@@ -23,14 +24,17 @@ const getAll = async (req, res) => {
     if (status && ['active', 'inactive', 'on_leave'].includes(status)) {
         filter.status = status;
     }
-    if (school) {
+    // org_admin can never widen the filter to another org via ?school=; their
+    // own organization always wins (applied below, after the client's value).
+    if (school && req.user?.role !== 'org_admin') {
         filter.school = school;
     }
+    const scopedFilter = (0, tenant_scope_1.applyOrgFilter)(req, filter, 'school');
     // For text search we'll filter after population on profile name
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
     const limitNum = Math.max(1, Math.min(100, parseInt(limit, 10) || 10));
     const skip = (pageNum - 1) * limitNum;
-    let query = teacher_model_1.default.find(filter)
+    let query = teacher_model_1.default.find(scopedFilter)
         .populate('user', 'email isVerified isActive')
         .populate('profile', 'firstName lastName gender')
         .populate('school', 'name')
@@ -42,7 +46,7 @@ const getAll = async (req, res) => {
     }
     const [teachers, total] = await Promise.all([
         query.skip(skip).limit(limitNum).lean(),
-        teacher_model_1.default.countDocuments(filter),
+        teacher_model_1.default.countDocuments(scopedFilter),
     ]);
     // Apply search filter in-memory on profile name / email / teacherId
     let filteredTeachers = teachers;
@@ -73,6 +77,7 @@ const getById = async (req, res) => {
         .populate('courses', 'title.en slug category status');
     if (!teacher)
         throw new api_error_1.NotFoundError('Teacher');
+    (0, tenant_scope_1.assertOwnsOrg)(req, teacher, 'school');
     return api_response_1.default.success(res, teacher);
 };
 exports.getById = getById;
@@ -113,7 +118,7 @@ const create = async (req, res) => {
         user: user._id,
         profile: profile._id,
         teacherId,
-        school: school || undefined,
+        school: (0, tenant_scope_1.resolveOrgIdForCreate)(req, school) || undefined,
         qualification: qualification || '',
         specialization: specialization || [],
         experience: experience || 0,
@@ -135,6 +140,7 @@ const update = async (req, res) => {
     const teacher = await teacher_model_1.default.findById(req.params.id);
     if (!teacher)
         throw new api_error_1.NotFoundError('Teacher');
+    (0, tenant_scope_1.assertOwnsOrg)(req, teacher, 'school');
     const { firstName, lastName, gender, school, qualification, specialization, experience, bio, status, joiningDate, } = req.body;
     // Update profile if name/gender changed
     if (firstName || lastName || gender) {
@@ -147,8 +153,8 @@ const update = async (req, res) => {
             profileUpdate.gender = gender;
         await profile_model_1.default.findByIdAndUpdate(teacher.profile, profileUpdate);
     }
-    // Update teacher fields
-    if (school !== undefined)
+    // Update teacher fields — org_admin can never move a teacher to another org.
+    if (school !== undefined && req.user?.role !== 'org_admin')
         teacher.school = school || null;
     if (qualification !== undefined)
         teacher.qualification = qualification;
@@ -178,6 +184,7 @@ const remove = async (req, res) => {
     const teacher = await teacher_model_1.default.findById(req.params.id);
     if (!teacher)
         throw new api_error_1.NotFoundError('Teacher');
+    (0, tenant_scope_1.assertOwnsOrg)(req, teacher, 'school');
     // Check if teacher has active courses
     const Course = mongoose_1.default.model('Course');
     const activeCourses = await Course.countDocuments({
@@ -204,6 +211,10 @@ const updateStatus = async (req, res) => {
     if (!status || !['active', 'inactive', 'on_leave'].includes(status)) {
         throw new api_error_1.BadRequestError('Valid status required: active, inactive, or on_leave');
     }
+    const existing = await teacher_model_1.default.findById(req.params.id);
+    if (!existing)
+        throw new api_error_1.NotFoundError('Teacher');
+    (0, tenant_scope_1.assertOwnsOrg)(req, existing, 'school');
     const teacher = await teacher_model_1.default.findByIdAndUpdate(req.params.id, { status }, { new: true })
         .populate('profile', 'firstName lastName')
         .populate('school', 'name');

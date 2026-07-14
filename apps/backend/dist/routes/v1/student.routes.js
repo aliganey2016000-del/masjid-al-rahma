@@ -77,6 +77,8 @@ router.get('/export', role_middleware_1.adminOnly, (0, async_handler_middleware_
 router.get('/my/dashboard', (0, role_middleware_1.roleMiddleware)(['student']), (0, async_handler_middleware_1.asyncHandler)(studentController.getMyDashboard));
 // GET /api/v1/students/my/courses — Student self-service courses
 router.get('/my/courses', (0, role_middleware_1.roleMiddleware)(['student']), (0, async_handler_middleware_1.asyncHandler)(studentController.getMyCourses));
+// POST /api/v1/students/my/progress — Record lesson/quiz/assignment completion
+router.post('/my/progress', (0, role_middleware_1.roleMiddleware)(['student']), (0, async_handler_middleware_1.asyncHandler)(studentController.recordProgress));
 // ---------------------------------------------------------------------------
 // Single Student Routes (admin/teacher + self-access)
 // ---------------------------------------------------------------------------

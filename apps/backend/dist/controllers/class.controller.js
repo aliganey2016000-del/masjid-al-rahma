@@ -7,6 +7,7 @@ exports.getSchedule = exports.updateStatus = exports.remove = exports.update = e
 const class_model_1 = __importDefault(require("../models/class.model"));
 const api_response_1 = __importDefault(require("../utils/api-response"));
 const api_error_1 = require("../utils/api-error");
+const tenant_scope_1 = require("../utils/tenant-scope");
 const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 // ---------------------------------------------------------------------------
 // GET /classes — List all with optional filters
@@ -14,14 +15,17 @@ const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 
 const getAll = async (req, res) => {
     const { schoolId, status, page = '1', limit = '50', search } = req.query;
     const filter = {};
-    if (schoolId)
+    // org_admin can't widen the filter to another org via ?schoolId=; their
+    // own organization always wins (applied below via applyOrgFilter).
+    if (schoolId && req.user?.role !== 'org_admin')
         filter.school = schoolId;
     if (status && ['active', 'inactive', 'completed'].includes(status))
         filter.status = status;
+    const scopedFilter = (0, tenant_scope_1.applyOrgFilter)(req, filter, 'school');
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
     const limitNum = Math.max(1, Math.min(200, parseInt(limit, 10) || 50));
     const [classes, total] = await Promise.all([
-        class_model_1.default.find(filter)
+        class_model_1.default.find(scopedFilter)
             .populate('school', 'name')
             .populate('course', 'title.en slug category')
             .populate('teacher', 'teacherId')
@@ -29,7 +33,7 @@ const getAll = async (req, res) => {
             .skip((pageNum - 1) * limitNum)
             .limit(limitNum)
             .lean(),
-        class_model_1.default.countDocuments(filter),
+        class_model_1.default.countDocuments(scopedFilter),
     ]);
     let result = classes;
     if (search) {
@@ -53,7 +57,11 @@ exports.getAll = getAll;
 // POST /classes — Create
 // ---------------------------------------------------------------------------
 const create = async (req, res) => {
-    const cls = await class_model_1.default.create(req.body);
+    const payload = {
+        ...req.body,
+        school: (0, tenant_scope_1.resolveOrgIdForCreate)(req, req.body.school),
+    };
+    const cls = await class_model_1.default.create(payload);
     const populated = await class_model_1.default.findById(cls._id)
         .populate('school', 'name')
         .populate('course', 'title.en slug category')
@@ -66,7 +74,15 @@ exports.create = create;
 // PATCH /classes/:id — Update
 // ---------------------------------------------------------------------------
 const update = async (req, res) => {
-    const cls = await class_model_1.default.findByIdAndUpdate(req.params.id, req.body, {
+    const existing = await class_model_1.default.findById(req.params.id);
+    if (!existing)
+        throw new api_error_1.NotFoundError('Class');
+    (0, tenant_scope_1.assertOwnsOrg)(req, existing, 'school');
+    const updates = { ...req.body };
+    // org_admin can never move a class to a different organization.
+    if (req.user?.role === 'org_admin')
+        delete updates.school;
+    const cls = await class_model_1.default.findByIdAndUpdate(req.params.id, updates, {
         new: true,
         runValidators: true,
     })
@@ -83,9 +99,11 @@ exports.update = update;
 // DELETE /classes/:id
 // ---------------------------------------------------------------------------
 const remove = async (req, res) => {
-    const cls = await class_model_1.default.findByIdAndDelete(req.params.id);
-    if (!cls)
+    const existing = await class_model_1.default.findById(req.params.id);
+    if (!existing)
         throw new api_error_1.NotFoundError('Class');
+    (0, tenant_scope_1.assertOwnsOrg)(req, existing, 'school');
+    await class_model_1.default.findByIdAndDelete(req.params.id);
     return api_response_1.default.noContent(res, 'Class deleted');
 };
 exports.remove = remove;
@@ -97,6 +115,10 @@ const updateStatus = async (req, res) => {
     if (!status || !['active', 'inactive', 'completed'].includes(status)) {
         throw new api_error_1.BadRequestError('Valid status required: active, inactive, or completed');
     }
+    const existing = await class_model_1.default.findById(req.params.id);
+    if (!existing)
+        throw new api_error_1.NotFoundError('Class');
+    (0, tenant_scope_1.assertOwnsOrg)(req, existing, 'school');
     const cls = await class_model_1.default.findByIdAndUpdate(req.params.id, { status }, { new: true })
         .populate('school', 'name')
         .populate('course', 'title.en slug')

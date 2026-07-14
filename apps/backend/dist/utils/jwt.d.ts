@@ -6,6 +6,7 @@ interface AccessTokenPayload {
     userId: string;
     role: string;
     permissions: string[];
+    organizationId?: string;
 }
 interface RefreshTokenPayload {
     userId: string;

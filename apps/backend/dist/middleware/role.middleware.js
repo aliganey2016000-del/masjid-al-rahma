@@ -66,10 +66,10 @@ exports.roleMiddleware = roleMiddleware;
 // ---------------------------------------------------------------------------
 // Convenience Middleware — Pre-configured Role Guards
 // ---------------------------------------------------------------------------
-/** Allows only admin users. */
-exports.adminOnly = (0, exports.roleMiddleware)(['admin']);
-/** Allows admin and teacher users. */
-exports.adminOrTeacher = (0, exports.roleMiddleware)(['admin', 'teacher']);
+/** Allows only admin and org_admin users. */
+exports.adminOnly = (0, exports.roleMiddleware)(['admin', 'org_admin']);
+/** Allows admin, org_admin, and teacher users. */
+exports.adminOrTeacher = (0, exports.roleMiddleware)(['admin', 'org_admin', 'teacher']);
 /** Allows admin, teacher, and parent users. */
 exports.staffAndParents = (0, exports.roleMiddleware)(['admin', 'teacher', 'parent']);
 /** Allows all authenticated users regardless of role. */
@@ -78,6 +78,7 @@ exports.anyAuthenticatedUser = (0, exports.roleMiddleware)([
     'teacher',
     'student',
     'parent',
+    'org_admin',
 ]);
 // ---------------------------------------------------------------------------
 // Conditional Self-Access Middleware
@@ -154,4 +155,11 @@ const adminOrParentOf = (getChildUserId) => {
     };
 };
 exports.adminOrParentOf = adminOrParentOf;
+// ---------------------------------------------------------------------------
+// Multi-Tenant Organization Scoping
+// ---------------------------------------------------------------------------
+// Actual per-organization data isolation for org_admin lives in
+// `utils/tenant-scope.ts` (applyOrgFilter / assertOwnsOrg / resolveOrgIdForCreate),
+// applied inside each controller's queries — a route-level middleware can't
+// filter a Mongoose query's *results*, only allow/deny the whole request.
 //# sourceMappingURL=role.middleware.js.map

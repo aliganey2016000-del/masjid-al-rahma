@@ -39,6 +39,7 @@ const parentSchema = new mongoose_1.Schema({
     profile: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Profile', required: true },
     parentId: { type: String, unique: true, sparse: true },
     children: [{ type: mongoose_1.Schema.Types.ObjectId, ref: 'Student' }],
+    school: { type: mongoose_1.Schema.Types.ObjectId, ref: 'School', default: undefined },
     occupation: { type: String, default: '' },
     relationship: { type: String, default: 'father', enum: ['father', 'mother', 'guardian', 'other'] },
     address: { type: String, default: '' },

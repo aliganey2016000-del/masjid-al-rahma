@@ -9,7 +9,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.reject = exports.approve = exports.exportStudents = exports.bulkImport = exports.getCertificates = exports.getPayments = exports.getResults = exports.getAttendance = exports.getMyCourses = exports.getCourses = exports.getMyDashboard = exports.remove = exports.updateStatus = exports.update = exports.create = exports.getById = exports.getAll = void 0;
+exports.recordProgress = exports.reject = exports.approve = exports.exportStudents = exports.bulkImport = exports.getCertificates = exports.getPayments = exports.getResults = exports.getAttendance = exports.getMyCourses = exports.getCourses = exports.getMyDashboard = exports.remove = exports.updateStatus = exports.update = exports.create = exports.getById = exports.getAll = void 0;
 const student_model_1 = __importDefault(require("../models/student.model"));
 const user_model_1 = __importDefault(require("../models/user.model"));
 const profile_model_1 = __importDefault(require("../models/profile.model"));
@@ -18,6 +18,7 @@ const course_content_model_1 = __importDefault(require("../models/course-content
 const api_error_1 = require("../utils/api-error");
 const api_response_1 = __importDefault(require("../utils/api-response"));
 const ensure_student_1 = __importDefault(require("../utils/ensure-student"));
+const tenant_scope_1 = require("../utils/tenant-scope");
 // ---------------------------------------------------------------------------
 // List Students (Admin & Teacher only)
 // ---------------------------------------------------------------------------
@@ -52,11 +53,12 @@ const getAll = async (req, res) => {
         filter.$or = filter.$or || [];
         filter.$or.push({ studentId: searchRegex });
     }
+    const scopedFilter = (0, tenant_scope_1.applyOrgFilter)(req, filter, 'school');
     let allStudents;
     let total;
     if (search) {
         const [students, count] = await Promise.all([
-            student_model_1.default.find(filter)
+            student_model_1.default.find(scopedFilter)
                 .populate('user', 'email role isActive isVerified preferredLanguage')
                 .populate('profile', 'firstName lastName avatar gender')
                 .populate('parent', 'user profile')
@@ -65,7 +67,7 @@ const getAll = async (req, res) => {
                 .populate('enrolledCourses', 'title slug')
                 .sort({ createdAt: -1 })
                 .lean(),
-            student_model_1.default.countDocuments(filter),
+            student_model_1.default.countDocuments(scopedFilter),
         ]);
         const s = search.toLowerCase();
         const filtered = students.filter((st) => {
@@ -79,7 +81,7 @@ const getAll = async (req, res) => {
     }
     else {
         const [students, count] = await Promise.all([
-            student_model_1.default.find(filter)
+            student_model_1.default.find(scopedFilter)
                 .populate('user', 'email role isActive isVerified preferredLanguage')
                 .populate('profile', 'firstName lastName avatar gender')
                 .populate('parent', 'user profile')
@@ -90,7 +92,7 @@ const getAll = async (req, res) => {
                 .skip((page - 1) * limit)
                 .limit(limit)
                 .lean(),
-            student_model_1.default.countDocuments(filter),
+            student_model_1.default.countDocuments(scopedFilter),
         ]);
         allStudents = students;
         total = count;
@@ -112,6 +114,7 @@ const getById = async (req, res) => {
         .lean();
     if (!student)
         throw new api_error_1.NotFoundError('Student');
+    (0, tenant_scope_1.assertOwnsOrg)(req, student, 'school');
     const userId = req.user?.userId;
     const role = req.user?.role;
     if (role === 'student' && student.user?._id?.toString() !== userId) {
@@ -137,7 +140,7 @@ const create = async (req, res) => {
     const profile = await profile_model_1.default.create({ user: user._id, firstName, lastName, gender });
     const student = await student_model_1.default.create({
         user: user._id, profile: profile._id, parent: parentId || undefined,
-        school: school || undefined, class: classId || undefined,
+        school: (0, tenant_scope_1.resolveOrgIdForCreate)(req, school) || undefined, class: classId || undefined,
         enrollmentDate: enrollmentDate || new Date(), grade: grade || undefined, medicalNotes: medicalNotes || undefined,
     });
     const populated = await student_model_1.default.findById(student._id)
@@ -156,6 +159,7 @@ const update = async (req, res) => {
     const student = await student_model_1.default.findById(req.params.id);
     if (!student)
         throw new api_error_1.NotFoundError('Student');
+    (0, tenant_scope_1.assertOwnsOrg)(req, student, 'school');
     const { firstName, lastName, gender, school, classId, grade, medicalNotes, parent, enrollmentDate, status, attendancePercentage, gpa, totalFeesPaid, totalFeesDue } = req.body;
     if (firstName || lastName || gender) {
         const profileUpdate = {};
@@ -167,7 +171,8 @@ const update = async (req, res) => {
             profileUpdate.gender = gender;
         await profile_model_1.default.findByIdAndUpdate(student.profile, profileUpdate);
     }
-    if (school !== undefined)
+    // org_admin can never move a student to a different organization.
+    if (school !== undefined && req.user?.role !== 'org_admin')
         student.school = school || undefined;
     if (classId !== undefined)
         student.class = classId || undefined;
@@ -208,6 +213,10 @@ const updateStatus = async (req, res) => {
     if (!status || !['active', 'inactive', 'graduated', 'suspended'].includes(status)) {
         throw new api_error_1.BadRequestError('Valid status required: active, inactive, graduated, or suspended');
     }
+    const existing = await student_model_1.default.findById(req.params.id);
+    if (!existing)
+        throw new api_error_1.NotFoundError('Student');
+    (0, tenant_scope_1.assertOwnsOrg)(req, existing, 'school');
     const student = await student_model_1.default.findByIdAndUpdate(req.params.id, { status }, { new: true })
         .populate('profile', 'firstName lastName');
     if (!student)
@@ -222,6 +231,7 @@ const remove = async (req, res) => {
     const student = await student_model_1.default.findById(req.params.id);
     if (!student)
         throw new api_error_1.NotFoundError('Student');
+    (0, tenant_scope_1.assertOwnsOrg)(req, student, 'school');
     await user_model_1.default.findByIdAndUpdate(student.user, { isActive: false });
     student.status = 'inactive';
     await student.save();
@@ -368,7 +378,13 @@ exports.exportStudents = exportStudents;
 // Approve / Reject Student (Admin)
 // ---------------------------------------------------------------------------
 const approve = async (req, res) => {
-    const { school, classId } = req.body;
+    const existing = await student_model_1.default.findById(req.params.id);
+    if (!existing)
+        throw new api_error_1.NotFoundError('Student');
+    (0, tenant_scope_1.assertOwnsOrg)(req, existing, 'school'); // no-op if unclaimed, blocks if already another org's
+    // org_admin can only approve students INTO their own organization.
+    const school = (0, tenant_scope_1.resolveOrgIdForCreate)(req, req.body.school);
+    const { classId } = req.body;
     if (!school)
         throw new api_error_1.BadRequestError('School is required for approval');
     if (!classId)
@@ -384,6 +400,10 @@ const approve = async (req, res) => {
 };
 exports.approve = approve;
 const reject = async (req, res) => {
+    const existing = await student_model_1.default.findById(req.params.id);
+    if (!existing)
+        throw new api_error_1.NotFoundError('Student');
+    (0, tenant_scope_1.assertOwnsOrg)(req, existing, 'school');
     const student = await student_model_1.default.findByIdAndUpdate(req.params.id, { approvalStatus: 'rejected' }, { new: true })
         .populate('user', 'email')
         .populate('profile', 'firstName lastName');
@@ -392,4 +412,40 @@ const reject = async (req, res) => {
     return api_response_1.default.success(res, student, 'Student rejected');
 };
 exports.reject = reject;
+// ---------------------------------------------------------------------------
+// Record Progress — POST /api/v1/students/my/progress
+// ---------------------------------------------------------------------------
+const recordProgress = async (req, res) => {
+    const { courseId, itemType } = req.body;
+    if (!courseId)
+        throw new api_error_1.BadRequestError('Course ID is required.');
+    if (!['lesson', 'quiz', 'assignment'].includes(itemType))
+        throw new api_error_1.BadRequestError('itemType must be lesson, quiz, or assignment.');
+    const student = await (0, ensure_student_1.default)(req.user.userId);
+    if (!student)
+        throw new api_error_1.NotFoundError('Student record not found.');
+    let progress = await progress_model_1.default.findOne({ student: student._id, course: courseId });
+    if (!progress) {
+        const content = await course_content_model_1.default.findOne({ course: courseId });
+        const total = content ? (content.totalLessons || 0) + (content.totalQuizzes || 0) + (content.totalAssignments || 0) : 0;
+        progress = await progress_model_1.default.create({ student: student._id, course: courseId,
+            completedLessons: itemType === 'lesson' ? 1 : 0, completedQuizzes: itemType === 'quiz' ? 1 : 0,
+            completedAssignments: itemType === 'assignment' ? 1 : 0, totalItems: total, lastAccessed: new Date(), status: 'in_progress' });
+    }
+    else {
+        if (itemType === 'lesson')
+            progress.completedLessons += 1;
+        else if (itemType === 'quiz')
+            progress.completedQuizzes += 1;
+        else
+            progress.completedAssignments += 1;
+        const done = progress.completedLessons + progress.completedQuizzes + progress.completedAssignments;
+        if (done >= progress.totalItems && progress.totalItems > 0)
+            progress.status = 'completed';
+        progress.lastAccessed = new Date();
+        await progress.save();
+    }
+    return api_response_1.default.success(res, { progress }, 'Progress recorded.');
+};
+exports.recordProgress = recordProgress;
 //# sourceMappingURL=student.controller.js.map

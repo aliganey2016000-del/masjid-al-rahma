@@ -15,6 +15,7 @@ require("../models/teacher.model"); // Register Teacher model for population
 const api_error_1 = require("../utils/api-error");
 const api_response_1 = __importDefault(require("../utils/api-response"));
 const ensure_student_1 = __importDefault(require("../utils/ensure-student"));
+const tenant_scope_1 = require("../utils/tenant-scope");
 // ---------------------------------------------------------------------------
 // List Courses (Public — only published)
 // ---------------------------------------------------------------------------
@@ -68,8 +69,9 @@ const getAllAdmin = async (req, res) => {
         filter.status = status;
     if (category)
         filter.category = category;
+    const scopedFilter = (0, tenant_scope_1.applyOrgFilter)(req, filter, 'school');
     const [courses, total] = await Promise.all([
-        course_model_1.default.find(filter)
+        course_model_1.default.find(scopedFilter)
             .populate({
             path: 'teacher',
             select: 'teacherId profile',
@@ -81,7 +83,7 @@ const getAllAdmin = async (req, res) => {
             .skip((page - 1) * limit)
             .limit(limit)
             .lean(),
-        course_model_1.default.countDocuments(filter),
+        course_model_1.default.countDocuments(scopedFilter),
     ]);
     return api_response_1.default.paginated(res, courses, { page, limit, total });
 };
@@ -121,11 +123,12 @@ const getByIdAdmin = async (req, res) => {
     if (!course) {
         throw new api_error_1.NotFoundError('Course');
     }
+    (0, tenant_scope_1.assertOwnsOrg)(req, course, 'school');
     return api_response_1.default.success(res, course);
 };
 exports.getByIdAdmin = getByIdAdmin;
 // ---------------------------------------------------------------------------
-// Create Course (Admin only)
+// Create Course (Admin, or org_admin — scoped to their own org)
 // ---------------------------------------------------------------------------
 const create = async (req, res) => {
     const { title, description, category, level, duration, fee, teacher, school, class: classId, maxStudents, syllabus, prerequisites } = req.body;
@@ -148,7 +151,7 @@ const create = async (req, res) => {
         duration,
         fee: fee || 0,
         teacher: teacher || null,
-        school: school || null,
+        school: (0, tenant_scope_1.resolveOrgIdForCreate)(req, school) || null,
         class: classId || null,
         maxStudents,
         syllabus: syllabus || [],
@@ -171,6 +174,10 @@ exports.create = create;
 // Update Course (Admin only)
 // ---------------------------------------------------------------------------
 const update = async (req, res) => {
+    const existing = await course_model_1.default.findById(req.params.id);
+    if (!existing)
+        throw new api_error_1.NotFoundError('Course');
+    (0, tenant_scope_1.assertOwnsOrg)(req, existing, 'school');
     const allowedUpdates = [
         'title', 'description', 'category', 'level', 'duration',
         'fee', 'teacher', 'school', 'class', 'maxStudents', 'syllabus', 'prerequisites', 'status',
@@ -182,6 +189,9 @@ const update = async (req, res) => {
             updates[key] = req.body[key];
         }
     }
+    // org_admin can never move a course to a different organization.
+    if (req.user?.role === 'org_admin')
+        delete updates.school;
     // If title.en changed, regenerate slug
     if (updates.title && updates.title.en) {
         updates.slug = updates.title.en
@@ -212,6 +222,10 @@ exports.update = update;
 // Delete Course (Admin only)
 // ---------------------------------------------------------------------------
 const remove = async (req, res) => {
+    const existing = await course_model_1.default.findById(req.params.id);
+    if (!existing)
+        throw new api_error_1.NotFoundError('Course');
+    (0, tenant_scope_1.assertOwnsOrg)(req, existing, 'school');
     const course = await course_model_1.default.findByIdAndDelete(req.params.id);
     if (!course) {
         throw new api_error_1.NotFoundError('Course');

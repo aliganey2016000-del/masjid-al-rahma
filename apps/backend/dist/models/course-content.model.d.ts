@@ -25,11 +25,38 @@ export interface ILesson {
     createdAt?: Date;
     updatedAt?: Date;
 }
+export type QuestionType = 'mcq' | 'true_false' | 'matching' | 'ordering' | 'picture_choice' | 'swipe_sort' | 'listen_write' | 'fill_blank' | 'word_scramble' | 'sentence_build';
 export interface IQuizQuestion {
+    type?: QuestionType;
     question: string;
-    options: string[];
-    correctIndex: number;
     explanation?: string;
+    points?: number;
+    options?: string[];
+    correctIndex?: number;
+    correctAnswer?: boolean;
+    pairs?: {
+        left: string;
+        right: string;
+    }[];
+    items?: string[];
+    choices?: {
+        image: string;
+        label?: string;
+    }[];
+    leftLabel?: string;
+    rightLabel?: string;
+    cards?: {
+        text: string;
+        correctSide: 'left' | 'right';
+    }[];
+    audioUrl?: string;
+    correctText?: string;
+    hint?: string;
+    textTemplate?: string;
+    blanks?: string[];
+    distractors?: string[];
+    answer?: string;
+    words?: string[];
 }
 export interface IQuiz {
     _id?: mongoose.Types.ObjectId;
