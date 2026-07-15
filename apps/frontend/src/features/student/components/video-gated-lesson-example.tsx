@@ -4,9 +4,9 @@
  */
 
 import { useEffect, useState } from 'react';
-import { VideoGatedPlayer } from '../shared/components/video-gated-player';
-import { useVideoGating, useCheckpointNotifications, useProgressTracker, useTimeFormatter } from '../shared/hooks/useVideoGating';
-import api from '../../lib/axios';
+import { VideoGatedPlayer } from '../../shared/components/video-gated-player';
+import { useVideoGating, useCheckpointNotifications, useProgressTracker, useTimeFormatter } from '../../shared/hooks/useVideoGating';
+import api from '../../../lib/axios';
 
 interface VideoLessonProps {
   courseId: string;
@@ -33,7 +33,7 @@ export function VideoGatedLessonExample({
   const [error, setError] = useState('');
 
   const getNotification = useCheckpointNotifications();
-  const { trackProgress } = useProgressTracker(lessonId, async (progress) => {
+  const { trackProgress } = useProgressTracker(lessonId, async (progress: number) => {
     // Send progress update to backend
     await api.post(`/lessons/${lessonId}/progress`, { percentWatched: progress });
   });
@@ -87,7 +87,6 @@ export function VideoGatedLessonExample({
         description={lessonDescription}
         gatingConfig={{
           enabled: gatingSettings?.enabled ?? true,
-          blockForwardSeeking: gatingSettings?.blockForwardSeeking ?? true,
           checkpoints: gatingSettings?.checkpoints ?? [33, 66, 95],
           minWatchPercentToUnlock: gatingSettings?.minWatchPercentToUnlock ?? 95,
         }}

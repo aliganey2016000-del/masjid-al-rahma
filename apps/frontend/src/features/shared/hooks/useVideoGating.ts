@@ -84,7 +84,7 @@ export function useVideoGating(
           duration,
           percentWatched,
           isLocked:
-            gatingConfig?.enabled &&
+            !!gatingConfig?.enabled &&
             percentWatched < (gatingConfig?.minWatchPercentToUnlock ?? 95),
         };
       });
