@@ -62,6 +62,7 @@ export function StudentSidebar() {
       title: t('learning'),
       items: [
         { path: '/student/courses', label: t('my_courses'), icon: '📚' },
+        { path: '/student/schedule', label: 'My Schedule', icon: '🕐' },
         { path: '/student/available', label: t('browse_courses'), icon: '🆕' },
         { path: '/student/assignments', label: t('assignments'), icon: '📝' },
         { path: '/student/downloads', label: t('downloads'), icon: '📥' },
