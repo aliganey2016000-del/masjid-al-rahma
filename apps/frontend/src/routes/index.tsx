@@ -164,6 +164,9 @@ const SettingsManage = lazy(() =>
 const SidebarSettingsManage = lazy(() =>
   import('../features/admin/pages/sidebar-settings-manage').then((m) => ({ default: m.SidebarSettingsManage }))
 );
+const OrgAdminSidebarManage = lazy(() =>
+  import('../features/admin/pages/org-admin-sidebar-manage').then((m) => ({ default: m.OrgAdminSidebarManage }))
+);
 const AnalyticsManage = lazy(() =>
   import('../features/admin/pages/analytics-manage').then((m) => ({ default: m.AnalyticsManage }))
 );
@@ -271,6 +274,7 @@ export const router = createBrowserRouter([
       { path: 'roles', element: L(<RolesManage />) },
       { path: 'settings', element: L(<SettingsManage />) },
       { path: 'settings/sidebar', element: L(<SidebarSettingsManage />) },
+      { path: 'settings/org-sidebar', element: L(<OrgAdminSidebarManage />) },
       { path: 'analytics', element: L(<AnalyticsManage />) },
       { path: 'logs', element: L(<ActivityLogsManage />) },
       { path: 'forum', element: L(<ForumPage />) },

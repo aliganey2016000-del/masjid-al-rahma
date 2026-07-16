@@ -10,22 +10,28 @@
  * - Section grouping for main management, content, and system
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../../store/auth-context';
 import { motion, AnimatePresence } from 'framer-motion';
+import api from '../../../lib/axios';
 
 // ---------------------------------------------------------------------------
 // Navigation Items — grouped by section; items may nest a `children` list
 // to render as a collapsible sub-menu instead of a direct link.
 // ---------------------------------------------------------------------------
 
-interface NavLeaf { path: string; label: string; icon: string; }
-interface NavGroup { label: string; icon: string; children: NavLeaf[]; }
+interface NavLeaf { path: string; label: string; icon: string; key?: string; }
+interface NavGroup { label: string; icon: string; key?: string; children: NavLeaf[]; }
 type NavEntry = NavLeaf | NavGroup;
 
 function isGroup(entry: NavEntry): entry is NavGroup {
   return 'children' in entry;
+}
+
+/** Strips the leading /admin/ (or /admin) to match the backend's sidebar-item key format. */
+function keyForPath(path: string): string {
+  return path.replace(/^\//, '');
 }
 
 const navSections: { title: string; items: NavEntry[] }[] = [
@@ -47,7 +53,7 @@ const navSections: { title: string; items: NavEntry[] }[] = [
       { path: '/admin/schedules',    label: 'Class Schedules',    icon: '🕐' },
       { path: '/admin/attendance',   label: 'Attendance',         icon: '📅' },
       {
-        label: 'Exam Management', icon: '📝',
+        key: 'group:exam-management', label: 'Exam Management', icon: '📝',
         children: [
           { path: '/admin/exams',             label: 'Exam Scheduling',      icon: '🗓️' },
           { path: '/admin/exams/rooms',        label: 'Room Allocation',      icon: '🏛️' },
@@ -97,6 +103,58 @@ export function AdminSidebar() {
   const { user, logout } = useAuth();
   const location = useLocation();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const isSuperAdmin = user?.role === 'admin';
+
+  // Tenant-scoped visibility for org_admin/teacher, configured by a super
+  // admin via the Org Admin Sidebar Manager. Super admin always sees
+  // everything unfiltered — they're not scoped to any org's restrictions.
+  const [visibility, setVisibility] = useState<Record<string, boolean> | null>(null);
+
+  useEffect(() => {
+    if (isSuperAdmin || !user?.role) return;
+    (async () => {
+      try {
+        const { data } = await api.get('/sidebar-settings/mine', { params: { portal: 'admin' } });
+        const items: { key: string; visible: boolean }[] = data.data?.items || [];
+        const map: Record<string, boolean> = {};
+        items.forEach((i) => { map[i.key] = i.visible; });
+        setVisibility(map);
+      } catch {
+        setVisibility({}); // fail-open — show everything if settings can't be loaded
+      }
+    })();
+  }, [isSuperAdmin, user?.role]);
+
+  const isVisible = (key: string) => isSuperAdmin || visibility?.[key] !== false;
+
+  // Super admin gets one extra System item: the tool that configures other
+  // orgs' admin/teacher sidebars. org_admin/teacher never see it.
+  const effectiveSections: { title: string; items: NavEntry[] }[] = navSections.map((section) => {
+    if (section.title !== 'System' || !isSuperAdmin) return section;
+    return {
+      ...section,
+      items: [
+        ...section.items,
+        { path: '/admin/settings/org-sidebar', label: 'Org Admin Sidebar Manager', icon: '🗝️' } as NavLeaf,
+      ],
+    };
+  });
+
+  const visibleSections = effectiveSections
+    .map((section) => ({
+      title: section.title,
+      items: section.items
+        .map((item) => {
+          if (isGroup(item)) {
+            if (item.key && !isVisible(item.key)) return null;
+            const children = item.children.filter((c) => isVisible(keyForPath(c.path)));
+            return children.length > 0 ? { ...item, children } : null;
+          }
+          return isVisible(keyForPath(item.path)) ? item : null;
+        })
+        .filter((item): item is NavEntry => item !== null),
+    }))
+    .filter((section) => section.items.length > 0);
 
   const isActive = (path: string) => {
     if (path === '/admin') return location.pathname === '/admin';
@@ -145,7 +203,7 @@ export function AdminSidebar() {
 
       {/* ── Navigation ── */}
       <nav className="flex-1 overflow-y-auto py-3 px-3 hide-scrollbar">
-        {navSections.map((section) => {
+        {visibleSections.map((section) => {
           const sectionOpen = openSection === section.title;
           const sectionActive = sectionHasActiveItem(section);
           return (

@@ -1,24 +1,44 @@
 /**
  * Sidebar Setting Controller
- * Tenant-scoped show/hide configuration for the student portal sidebar.
+ * Tenant-scoped show/hide configuration for portal sidebars.
+ *
+ *   - portal 'student': org_admin manages their own org; admin manages any
+ *     org (must select one — no global/shared setting).
+ *   - portal 'admin': ONLY admin (super admin) may view/edit — this is the
+ *     shared org_admin/teacher admin-portal sidebar, and letting an
+ *     org_admin edit what they themselves see would defeat the point.
+ *     org_admin/teacher can only READ their own org's setting (via /mine)
+ *     to filter their own nav.
  */
 
 import { Request, Response } from 'express';
 import SidebarSetting from '../models/sidebar-setting.model';
 import ApiResponse from '../utils/api-response';
 import { BadRequestError, ForbiddenError, NotFoundError } from '../utils/api-error';
-import { STUDENT_SIDEBAR_ITEM_KEYS, mergeSidebarOverrides } from '../utils/sidebar-items';
+import { keysFor, mergeSidebarOverrides, SidebarPortal } from '../utils/sidebar-items';
+import { getOwnTeacherRecord } from '../utils/tenant-scope';
 import ensureStudentRecord from '../utils/ensure-student';
 
+function parsePortal(value: unknown): SidebarPortal {
+  if (value === 'admin') return 'admin';
+  if (value === 'student' || value === undefined) return 'student';
+  throw new BadRequestError('portal must be "student" or "admin"');
+}
+
 /**
- * Resolves which organization the caller may read/write settings for.
- *   - org_admin: always their own org — a school id in the query/body is
- *     ignored so they can never widen scope to another tenant.
- *   - admin: must explicitly pick an org (query ?school= / body.school) —
- *     there is no "global" sidebar-settings document, by design.
+ * Resolves which organization the caller may read/write settings for, and
+ * enforces the per-portal permission rule described above.
+ *   - org_admin + portal 'student': always their own org (school id in the
+ *     query/body is ignored so they can never widen scope).
+ *   - org_admin + portal 'admin': forbidden — read-only via /mine.
+ *   - admin: must explicitly pick an org (query ?school= / body.school) for
+ *     either portal — there is no "global" sidebar-settings document.
  */
-function resolveTargetSchool(req: Request, provided?: unknown): string {
+function resolveTargetSchool(req: Request, portal: SidebarPortal, provided?: unknown): string {
   if (req.user?.role === 'org_admin') {
+    if (portal === 'admin') {
+      throw new ForbiddenError('Only a super admin can configure the admin-portal sidebar.');
+    }
     if (!req.user.organizationId) throw new ForbiddenError('Your account is not linked to an organization.');
     return req.user.organizationId;
   }
@@ -28,25 +48,28 @@ function resolveTargetSchool(req: Request, provided?: unknown): string {
   return schoolId;
 }
 
-// GET /sidebar-settings?school=<id>  (org_admin ignores the query, uses own org)
+// GET /sidebar-settings?school=<id>&portal=<student|admin>
 export const getForOrg = async (req: Request, res: Response): Promise<Response> => {
-  const school = resolveTargetSchool(req, req.query.school);
+  const portal = parsePortal(req.query.portal);
+  const school = resolveTargetSchool(req, portal, req.query.school);
 
-  const setting = await SidebarSetting.findOne({ school, portal: 'student' }).lean();
-  const items = mergeSidebarOverrides(setting?.items || []);
+  const setting = await SidebarSetting.findOne({ school, portal }).lean();
+  const items = mergeSidebarOverrides(setting?.items || [], portal);
 
-  return ApiResponse.success(res, { school, items });
+  return ApiResponse.success(res, { school, portal, items });
 };
 
-// PUT /sidebar-settings  { school?, items: [{ key, visible }] }
+// PUT /sidebar-settings  { school?, portal?, items: [{ key, visible }] }
 export const update = async (req: Request, res: Response): Promise<Response> => {
-  const school = resolveTargetSchool(req, req.body.school);
+  const portal = parsePortal(req.body.portal);
+  const school = resolveTargetSchool(req, portal, req.body.school);
   const { items } = req.body as { items: { key: string; visible: boolean }[] };
 
   if (!Array.isArray(items)) throw new BadRequestError('items must be an array');
+  const validKeys = keysFor(portal);
   for (const item of items) {
-    if (!STUDENT_SIDEBAR_ITEM_KEYS.has(item.key)) {
-      throw new BadRequestError(`Unknown sidebar item key "${item.key}"`);
+    if (!validKeys.has(item.key)) {
+      throw new BadRequestError(`Unknown sidebar item key "${item.key}" for portal "${portal}"`);
     }
     if (typeof item.visible !== 'boolean') {
       throw new BadRequestError(`visible must be a boolean for "${item.key}"`);
@@ -54,22 +77,39 @@ export const update = async (req: Request, res: Response): Promise<Response> => 
   }
 
   const setting = await SidebarSetting.findOneAndUpdate(
-    { school, portal: 'student' },
-    { school, portal: 'student', items, updatedBy: req.user!.userId },
+    { school, portal },
+    { school, portal, items, updatedBy: req.user!.userId },
     { new: true, upsert: true, runValidators: true }
   ).lean();
 
-  return ApiResponse.success(res, { school, items: mergeSidebarOverrides(setting!.items) }, 'Sidebar settings saved');
+  return ApiResponse.success(res, { school, portal, items: mergeSidebarOverrides(setting!.items, portal) }, 'Sidebar settings saved');
 };
 
-// GET /sidebar-settings/mine — effective settings for the caller's own org (student portal)
+// GET /sidebar-settings/mine?portal=<student|admin> — effective settings for the caller's own org
 export const getMine = async (req: Request, res: Response): Promise<Response> => {
-  const student = await ensureStudentRecord(req.user!.userId);
-  const school = (student as any).school;
-  if (!school) throw new NotFoundError('Organization for this student');
+  const portal = parsePortal(req.query.portal);
+  const role = req.user?.role;
 
-  const setting = await SidebarSetting.findOne({ school, portal: 'student' }).lean();
-  const items = mergeSidebarOverrides(setting?.items || []);
+  let school: unknown;
+  if (portal === 'admin') {
+    if (role === 'org_admin') {
+      school = req.user!.organizationId;
+    } else if (role === 'teacher') {
+      const teacher = await getOwnTeacherRecord(req);
+      school = teacher?.school;
+    } else {
+      throw new ForbiddenError('Only org_admin/teacher have an admin-portal sidebar to read.');
+    }
+  } else {
+    if (role !== 'student') throw new ForbiddenError('Only students have a student-portal sidebar to read.');
+    const student = await ensureStudentRecord(req.user!.userId);
+    school = (student as any).school;
+  }
+
+  if (!school) throw new NotFoundError('Organization for this account');
+
+  const setting = await SidebarSetting.findOne({ school, portal }).lean();
+  const items = mergeSidebarOverrides(setting?.items || [], portal);
 
   return ApiResponse.success(res, { items });
 };

@@ -8,11 +8,14 @@ const router = Router();
 
 router.use(authMiddleware);
 
-// Student portal reads its own org's effective settings.
-router.get('/mine', roleMiddleware(['student']), asyncHandler(sidebarSettingController.getMine));
+// Student/org_admin/teacher read their own org's effective settings for
+// whichever portal they belong to (?portal=student|admin) — the controller
+// enforces which role may read which portal.
+router.get('/mine', roleMiddleware(['student', 'org_admin', 'teacher']), asyncHandler(sidebarSettingController.getMine));
 
-// Admin/org_admin manage settings — org_admin is always scoped to their own
-// org inside the controller; admin must explicitly select an organization.
+// Admin/org_admin manage settings — the controller enforces that only a
+// super admin (role 'admin') may touch portal='admin' settings; org_admin
+// stays scoped to their own org and portal='student' only.
 router.get('/', adminOnly, asyncHandler(sidebarSettingController.getForOrg));
 router.put('/', adminOnly, asyncHandler(sidebarSettingController.update));
 
