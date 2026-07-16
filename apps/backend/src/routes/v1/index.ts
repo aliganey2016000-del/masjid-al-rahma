@@ -30,6 +30,8 @@ import schoolRoutes from './school.routes';
 import courseContentRoutes from './course-content.routes';
 import aiRoutes from './ai.routes';
 import forumRoutes from './forum.routes';
+import sidebarSettingRoutes from './sidebar-setting.routes';
+import tenantRoutes from './tenant.routes';
 
 const router = Router();
 
@@ -64,6 +66,8 @@ router.use('/schools', schoolRoutes);
 router.use('/courses/:courseId/content', courseContentRoutes);
 router.use('/ai', aiRoutes);
 router.use('/forum', forumRoutes);
+router.use('/sidebar-settings', sidebarSettingRoutes);
+router.use('/tenant', tenantRoutes);
 
 // ---------------------------------------------------------------------------
 // Health Check Endpoint
