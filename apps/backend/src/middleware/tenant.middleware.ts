@@ -47,7 +47,12 @@ export async function tenantMiddleware(
   next: NextFunction
 ): Promise<void> {
   try {
-    const host = req.get('host') || '';
+    // The frontend's nginx proxies /api/ to this backend's public URL (they
+    // are separate Coolify apps with no shared Docker network), which means
+    // the Host header nginx sends must stay api.sahaledu.com so Coolify's
+    // edge proxy routes the request here. The real tenant subdomain the
+    // visitor requested travels in X-Forwarded-Host instead.
+    const host = (req.get('x-forwarded-host') || req.get('host') || '').split(',')[0].trim();
 
     // Fast-path: localhost or IP → main site (no tenant lookup)
     const hostname = host.replace(/:\d+$/, '');
