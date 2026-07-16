@@ -80,6 +80,7 @@ const navSections: { title: string; items: NavEntry[] }[] = [
     items: [
       { path: '/admin/roles',        label: 'Roles & Permissions',icon: '🔐' },
       { path: '/admin/settings',     label: 'Settings',           icon: '⚙️' },
+      { path: '/admin/settings/sidebar', label: 'Student Sidebar Manager', icon: '🧭' },
       { path: '/admin/analytics',    label: 'Analytics',          icon: '📈' },
       { path: '/admin/logs',         label: 'Activity Logs',      icon: '📋' },
       { path: '/admin/profile',      label: 'Profile',            icon: '👤' },

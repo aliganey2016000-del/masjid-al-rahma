@@ -157,9 +157,16 @@ export const create = async (req: Request, res: Response): Promise<Response> => 
     .populate('createdBy', 'email')
     .lean();
 
+  const baseDomain = process.env.BASE_DOMAIN || 'sahaledu.com';
+  const portalUrl = `https://${school.slug}.${baseDomain}`;
+
   return ApiResponse.created(
     res,
-    populated,
+    {
+      school: populated,
+      portalUrl,
+      slug: school.slug,
+    },
     orgAdminWarning || 'School registered successfully'
   );
 };
