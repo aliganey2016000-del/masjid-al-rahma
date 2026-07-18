@@ -253,6 +253,8 @@ export const remove = async (req: Request, res: Response): Promise<Response> => 
 export const getMyDashboard = async (req: Request, res: Response): Promise<Response> => {
   const student = await ensureStudentRecord(req.user!.userId);
   await student.populate('enrolledCourses', 'title slug category level status thumbnail');
+  await student.populate('school', 'name logo');
+  await student.populate('profile', 'firstName lastName avatar gender');
 
   return ApiResponse.success(res, {
     studentId: (student as any).studentId || 'N/A',
@@ -263,6 +265,10 @@ export const getMyDashboard = async (req: Request, res: Response): Promise<Respo
     gpa: (student as any).gpa || 0,
     totalFeesPaid: (student as any).totalFeesPaid || 0,
     totalFeesDue: (student as any).totalFeesDue || 0,
+    totalFees: (student as any).totalFees || 0,
+    discount: (student as any).discount || 0,
+    profile: (student as any).profile || null,
+    school: (student as any).school || null,
   });
 };
 
