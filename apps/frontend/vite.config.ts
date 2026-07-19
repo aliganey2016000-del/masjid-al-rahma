@@ -8,6 +8,12 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
+      injectManifest: {
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,json}'],
+      },
       includeAssets: ['favicon.svg', 'icons/*.png', 'screenshots/*.png', 'offline.html'],
       manifest: {
         name: 'Masjid Al-Rahma Academy',
@@ -89,88 +95,6 @@ export default defineConfig({
           },
         ],
       },
-      workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,json}'],
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'google-fonts-cache',
-              expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 365 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-          {
-            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'gstatic-fonts-cache',
-              expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 365 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-          {
-            urlPattern: /\/api\/.*\/my\/.*/i,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'api-student-cache',
-              networkTimeoutSeconds: 5,
-              expiration: { maxEntries: 50, maxAgeSeconds: 60 * 5 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-          {
-            urlPattern: /\/api\/courses\/.*\/content/i,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'api-course-content-cache',
-              networkTimeoutSeconds: 10,
-              expiration: { maxEntries: 30, maxAgeSeconds: 60 * 30 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-          {
-            urlPattern: /\/api\/gamification\/(my|leaderboard)/i,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'api-gamification-cache',
-              networkTimeoutSeconds: 5,
-              expiration: { maxEntries: 20, maxAgeSeconds: 60 * 2 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-          {
-            urlPattern: /\/api\/.*/i,
-            handler: 'NetworkOnly',
-          },
-          {
-            urlPattern: /.*\.(png|jpg|jpeg|gif|svg|ico|webp)/i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'image-cache',
-              expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 30 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-          {
-            // Self-hosted lesson videos (direct .mp4/.webm links, not YouTube/Vimeo
-            // iframes — those can't work offline regardless of caching). Explicitly
-            // fetched once by the "Download for Offline" action to warm this cache
-            // ahead of time, then served from here whenever the network is down.
-            urlPattern: /.*\.(mp4|webm|ogg|mov|mkv|avi)(\?.*)?$/i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'offline-video-cache',
-              expiration: { maxEntries: 40, maxAgeSeconds: 60 * 60 * 24 * 60 },
-              cacheableResponse: { statuses: [0, 200] },
-              rangeRequests: true,
-            },
-          },
-        ],
-        navigateFallback: '/offline.html',
-        navigateFallbackDenylist: [/^\/api\//, /^\/_/],
-      },
     }),
   ],
   resolve: {
@@ -187,6 +111,12 @@ export default defineConfig({
         target: 'http://localhost:5000',
         changeOrigin: true,
         secure: false,
+      },
+      '/socket.io': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+        secure: false,
+        ws: true,
       },
     },
   },

@@ -10,6 +10,30 @@ import Gamification, { ALL_BADGES, xpForLevel, totalXpForLevel } from '../models
 import ApiResponse from '../utils/api-response';
 import { NotFoundError } from '../utils/api-error';
 import ensureStudentRecord from '../utils/ensure-student';
+import { notifyUser } from '../utils/notify';
+
+/** Fires level-up / new-badge notifications — best-effort, never blocks the response. */
+function notifyProgress(userId: string, levelBefore: number, gam: any, newBadgeKeys: string[]) {
+  if (gam.level > levelBefore) {
+    notifyUser({
+      userId,
+      title: `Level up! You're now level ${gam.level} 🎉`,
+      message: `Keep going — you're on a roll.`,
+      type: 'success',
+      link: '/student/analytics',
+    }).catch(() => {});
+  }
+  for (const key of newBadgeKeys) {
+    const badge = ALL_BADGES.find((b) => b.key === key);
+    notifyUser({
+      userId,
+      title: `New badge earned: ${badge?.name.en || key} 🏅`,
+      message: badge?.description.en || 'You earned a new badge.',
+      type: 'success',
+      link: '/student/analytics',
+    }).catch(() => {});
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -260,6 +284,7 @@ export const completeLesson = async (req: Request, res: Response): Promise<Respo
   const student = await ensureStudentRecord(req.user!.userId);
   const gam = await getOrCreate(student._id.toString());
 
+  const levelBefore = gam.level;
   const baseXP = 10;
   gam.xp += baseXP;
   gam.totalLessonsCompleted += 1;
@@ -282,8 +307,9 @@ export const completeLesson = async (req: Request, res: Response): Promise<Respo
     gam.xpToNextLevel = totalXpForLevel(2) - gam.xp;
   }
 
-  checkAutoBadges(gam);
+  const newBadges = checkAutoBadges(gam);
   await gam.save();
+  notifyProgress(req.user!.userId, levelBefore, gam, newBadges);
 
   return ApiResponse.success(res, {
     xp: gam.xp,
@@ -305,6 +331,7 @@ export const completeQuiz = async (req: Request, res: Response): Promise<Respons
   const student = await ensureStudentRecord(req.user!.userId);
   const gam = await getOrCreate(student._id.toString());
 
+  const levelBefore = gam.level;
   const pct = totalQuestions > 0 ? score / totalQuestions : 0;
   let xpEarned = 0;
 
@@ -340,8 +367,9 @@ export const completeQuiz = async (req: Request, res: Response): Promise<Respons
     gam.xpToNextLevel = totalXpForLevel(2) - gam.xp;
   }
 
-  checkAutoBadges(gam);
+  const newBadges = checkAutoBadges(gam);
   await gam.save();
+  notifyProgress(req.user!.userId, levelBefore, gam, newBadges);
 
   return ApiResponse.success(res, {
     xp: gam.xp,

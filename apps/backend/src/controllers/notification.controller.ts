@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import Notification from '../models/notification.model';
 import ApiResponse from '../utils/api-response';
 import { BadRequestError, NotFoundError } from '../utils/api-error';
+import { notifyUser } from '../utils/notify';
 
 // GET /my — Student's notifications (with unreadCount)
 export const getMyNotifications = async (req: Request, res: Response) => {
@@ -57,6 +58,6 @@ export const remove = async (req: Request, res: Response) => {
 export const create = async (req: Request, res: Response) => {
   const { user, title, message, type, link } = req.body;
   if (!user || !title || !message) throw new BadRequestError('user, title, and message required');
-  const n = await Notification.create({ user, title, message, type: type || 'info', link: link || '' });
+  const n = await notifyUser({ userId: user, title, message, type: type || 'info', link: link || '' });
   return ApiResponse.created(res, n, 'Notification created');
 };

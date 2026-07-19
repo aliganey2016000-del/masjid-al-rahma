@@ -11,6 +11,7 @@ import { RouterProvider } from 'react-router-dom';
 import { ThemeProvider } from './store/theme-context';
 import { AuthProvider } from './store/auth-context';
 import { TenantProvider } from './store/tenant-context';
+import { RealtimeProvider } from './store/realtime-context';
 import { router } from './routes';
 
 // Import i18n configuration (must be before any useTranslation calls)
@@ -21,7 +22,9 @@ export function App() {
     <TenantProvider>
       <ThemeProvider>
         <AuthProvider>
-          <RouterProvider router={router} />
+          <RealtimeProvider>
+            <RouterProvider router={router} />
+          </RealtimeProvider>
         </AuthProvider>
       </ThemeProvider>
     </TenantProvider>

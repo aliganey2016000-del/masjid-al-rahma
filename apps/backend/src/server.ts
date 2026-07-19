@@ -52,8 +52,11 @@ import './models/sidebar-setting.model';
 import './models/seat-allocation.model';
 import './models/progress.model';
 import './models/class-schedule.model';
+import './models/push-subscription.model';
 
+import http from 'http';
 import app from './app';
+import { initSocket } from './realtime/socket';
 
 const PORT = process.env.PORT || 5000;
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://rayan2016003_db_user:635110Liiali@rahma.bo0elay.mongodb.net/masjid-al-rahma?appName=rahma&retryWrites=true&w=majority';
@@ -68,11 +71,16 @@ async function startServer() {
     await mongoose.connect(MONGODB_URI);
     console.log('✅ Connected to MongoDB');
 
-    // Start Express server
-    app.listen(PORT, () => {
+    // Start Express server (wrapped in a raw http.Server so Socket.IO can
+    // share the same port instead of needing a separate one)
+    const httpServer = http.createServer(app);
+    initSocket(httpServer);
+
+    httpServer.listen(PORT, () => {
       console.log(`🚀 Server running on http://localhost:${PORT}`);
       console.log(`📡 API available at http://localhost:${PORT}/api/v1`);
       console.log(`💚 Health check: http://localhost:${PORT}/api/v1/health`);
+      console.log(`🔌 Realtime (Socket.IO) ready`);
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error);

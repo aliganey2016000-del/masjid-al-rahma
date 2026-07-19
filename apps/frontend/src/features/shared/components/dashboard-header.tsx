@@ -16,6 +16,8 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../../../store/auth-context';
 import api from '../../../lib/axios';
+import { GlobalSearchBar } from './global-search-bar';
+import { NotificationBell } from './notification-bell';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -140,7 +142,7 @@ export function DashboardHeader({ hidden }: DashboardHeaderProps) {
           <div className="absolute top-1/2 left-1/2 w-48 h-48 bg-blue-500 rounded-full blur-3xl -translate-x-1/2 -translate-y-1/2" />
         </div>
 
-        <div className="relative mx-auto max-w-6xl px-6 py-8 lg:py-12 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="relative mx-auto max-w-6xl px-6 py-8 lg:py-12 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             {/* Organization Logo/Avatar */}
             <div className="flex-shrink-0 flex h-14 w-14 lg:h-16 lg:w-16 items-center justify-center rounded-2xl bg-white/10 backdrop-blur-sm border border-white/20 shadow-xl">
@@ -154,11 +156,15 @@ export function DashboardHeader({ hidden }: DashboardHeaderProps) {
               </h2>
             </div>
           </div>
-          <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/15">
-            <div className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-xs font-medium text-emerald-300 uppercase tracking-wider">
-              Active
-            </span>
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            <GlobalSearchBar />
+            <NotificationBell />
+            <div className="hidden sm:flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/15 flex-shrink-0">
+              <div className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-xs font-medium text-emerald-300 uppercase tracking-wider">
+                Active
+              </span>
+            </div>
           </div>
         </div>
       </div>

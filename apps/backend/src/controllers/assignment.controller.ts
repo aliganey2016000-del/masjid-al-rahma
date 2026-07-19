@@ -21,10 +21,12 @@ import mongoose from 'mongoose';
 import Assignment from '../models/assignment.model';
 import AssignmentSubmission from '../models/assignment-submission.model';
 import Course from '../models/course.model';
+import Student from '../models/student.model';
 import ApiResponse from '../utils/api-response';
 import { BadRequestError, NotFoundError, ForbiddenError } from '../utils/api-error';
 import ensureStudentRecord from '../utils/ensure-student';
 import { getOwnTeacherRecord } from '../utils/tenant-scope';
+import { notifyUsers } from '../utils/notify';
 
 // ---------------------------------------------------------------------------
 // Shared ownership guard for assignment mutation/read endpoints — mirrors the
@@ -103,6 +105,20 @@ export const create = async (req: Request, res: Response) => {
     .populate('class', 'title section')
     .populate('createdBy', 'email')
     .lean();
+
+  // Notify every student enrolled in this course — best-effort, must never
+  // block the response if it fails.
+  Student.find({ enrolledCourses: item.course }).select('user').lean()
+    .then((students) => {
+      const courseTitle = (populated as any)?.course?.title?.en || 'your course';
+      return notifyUsers(students.map((s: any) => s.user.toString()), {
+        title: 'New assignment posted',
+        message: `${title} has been posted for ${courseTitle}`,
+        type: 'info',
+        link: `/student/assignments/${item._id}`,
+      });
+    })
+    .catch(() => {});
 
   return ApiResponse.created(res, populated, 'Assignment created');
 };
