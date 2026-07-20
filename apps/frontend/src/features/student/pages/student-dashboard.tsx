@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../../store/auth-context';
+import { OnboardingWizard } from '../../../components/shared/onboarding-wizard';
 import api from '../../../lib/axios';
 
 interface DashboardData {
@@ -25,8 +26,16 @@ export function StudentDashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [showWizard, setShowWizard] = useState(false);
 
   const lang = i18n.language as 'en' | 'so' | 'ar';
+
+  // Show onboarding wizard for new students who haven't completed it
+  useEffect(() => {
+    if (user && user.role === 'student' && user.onboardingCompleted === false) {
+      setShowWizard(true);
+    }
+  }, [user]);
 
   useEffect(() => {
     (async () => {
@@ -58,6 +67,11 @@ export function StudentDashboard() {
     </div>
   );
   if (!data) return null;
+
+  // ── Onboarding Wizard Overlay ──
+  if (showWizard) {
+    return <OnboardingWizard onComplete={() => setShowWizard(false)} />;
+  }
 
   const fullName = data.profile
     ? `${data.profile.firstName} ${data.profile.lastName}`.trim()

@@ -8,7 +8,8 @@
  *   - org_admin auto-loads with their own scoped data.
  */
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import api from '../../../lib/axios';
 import { useAuth } from '../../../store/auth-context';
 
@@ -52,6 +53,7 @@ interface Teacher {
   experience: number;
   bio: string;
   courses: TeacherCourse[];
+  coursePermission?: 'COURSE_BUILDER' | 'STUDENT_VIEW';
   status: 'active' | 'inactive' | 'on_leave';
   joiningDate: string;
   createdAt: string;
@@ -343,6 +345,190 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// Three-Dots Dropdown Menu (replaces inline Edit/Delete icons)
+// ---------------------------------------------------------------------------
+
+function ThreeDotsMenu({ teacher, onEdit, onDelete }: {
+  teacher: Teacher;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const toggleMenu = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!open && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setMenuStyle({
+        position: 'fixed',
+        top: rect.bottom + 4,
+        left: rect.right - 208, // w-52 = 208px
+        zIndex: 100,
+      });
+    }
+    setOpen(!open);
+  };
+
+  const handleAction = (action: () => void) => {
+    setOpen(false);
+    action();
+  };
+
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        onClick={toggleMenu}
+        className="p-2 rounded-lg hover:bg-[var(--color-surface-tertiary)] transition-colors"
+        title="Actions"
+      >
+        <svg className="h-4 w-4 text-[var(--color-text-secondary)]" fill="currentColor" viewBox="0 0 16 16">
+          <circle cx="8" cy="3" r="1.5" />
+          <circle cx="8" cy="8" r="1.5" />
+          <circle cx="8" cy="13" r="1.5" />
+        </svg>
+      </button>
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            style={menuStyle}
+            className="w-52 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-primary)] shadow-elevated py-1"
+          >
+            <button
+              onClick={() => handleAction(onEdit)}
+              className="w-full text-left px-4 py-2.5 text-xs font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-tertiary)] flex items-center gap-2 transition-colors"
+            >
+              ✏️ Edit Profile
+            </button>
+            <div className="border-t border-[var(--color-border-subtle)] my-1" />
+            <button
+              onClick={() => handleAction(onDelete)}
+              className="w-full text-left px-4 py-2.5 text-xs font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 flex items-center gap-2 transition-colors"
+            >
+              🗑️ Delete Teacher
+            </button>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Course Permission Modal
+// ---------------------------------------------------------------------------
+
+function PermissionModal({ teacher, onClose, onSaved }: {
+  teacher: Teacher;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const currentPerm = teacher.coursePermission || 'COURSE_BUILDER';
+  const [selected, setSelected] = useState<string>(currentPerm);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      await api.patch(`/teachers/${teacher._id}/course-permission`, { coursePermission: selected });
+      onSaved();
+      onClose();
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to update permission');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-[var(--color-surface-primary)] rounded-2xl p-6 w-full max-w-sm shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <h2 className="text-lg font-bold text-[var(--color-text-primary)] mb-1">
+          Course Content Permission
+        </h2>
+        <p className="text-xs text-[var(--color-text-tertiary)] mb-4">
+          {teacher.profile?.firstName} {teacher.profile?.lastName}
+        </p>
+
+        {error && <p className="text-red-500 text-xs mb-3 bg-red-50 dark:bg-red-950/30 rounded-lg px-3 py-2">{error}</p>}
+
+        <div className="space-y-2">
+          <label className={`flex items-start gap-3 rounded-xl border-2 p-4 cursor-pointer transition-all ${
+            selected === 'COURSE_BUILDER'
+              ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30'
+              : 'border-[var(--color-border-default)] hover:border-emerald-300'
+          }`}>
+            <input
+              type="radio"
+              name="coursePermission"
+              value="COURSE_BUILDER"
+              checked={selected === 'COURSE_BUILDER'}
+              onChange={() => setSelected('COURSE_BUILDER')}
+              className="mt-0.5 accent-emerald-600"
+            />
+            <div>
+              <span className="text-sm font-semibold text-[var(--color-text-primary)]">Course Builder</span>
+              <p className="text-[10px] text-[var(--color-text-tertiary)] mt-0.5">
+                Full write/edit access to course structure, chapters, and content blocks.
+              </p>
+            </div>
+          </label>
+
+          <label className={`flex items-start gap-3 rounded-xl border-2 p-4 cursor-pointer transition-all ${
+            selected === 'STUDENT_VIEW'
+              ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/30'
+              : 'border-[var(--color-border-default)] hover:border-amber-300'
+          }`}>
+            <input
+              type="radio"
+              name="coursePermission"
+              value="STUDENT_VIEW"
+              checked={selected === 'STUDENT_VIEW'}
+              onChange={() => setSelected('STUDENT_VIEW')}
+              className="mt-0.5 accent-amber-600"
+            />
+            <div>
+              <span className="text-sm font-semibold text-[var(--color-text-primary)]">Student View</span>
+              <p className="text-[10px] text-[var(--color-text-tertiary)] mt-0.5">
+                Read-only access. Same view as a student — no editing or saving allowed.
+              </p>
+            </div>
+          </label>
+        </div>
+
+        <div className="flex gap-2 mt-5">
+          <button onClick={onClose} className="flex-1 rounded-xl border border-[var(--color-border-default)] px-4 py-2.5 text-xs font-medium hover:bg-[var(--color-surface-tertiary)] transition-colors">
+            Cancel
+          </button>
+          <button onClick={handleSave} disabled={saving}
+            className="flex-1 rounded-xl bg-emerald-600 text-white px-4 py-2.5 text-xs font-semibold hover:bg-emerald-700 disabled:opacity-50 transition-colors">
+            {saving ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main Component
 // ---------------------------------------------------------------------------
 
@@ -561,8 +747,8 @@ export function TeachersManage() {
 
         {/* ── Table ── */}
         {!loading && hasFetched && teachers.length > 0 && (
-          <div className="rounded-2xl border border-[var(--color-border-default)] bg-[var(--color-surface-primary)] overflow-hidden shadow-card">
-            <div className="overflow-x-auto">
+          <div className="rounded-2xl border border-[var(--color-border-default)] bg-[var(--color-surface-primary)] overflow-visible shadow-card">
+            <div className="overflow-x-auto overflow-y-visible">
               <table className="w-full text-sm">
                 <thead className="bg-[var(--color-surface-secondary)] border-b border-[var(--color-border-default)]">
                   <tr>
@@ -620,22 +806,11 @@ export function TeachersManage() {
                         </button>
                       </td>
                       <td className="px-5 py-4 text-center" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-center gap-1">
-                          <button
-                            onClick={() => setEditingTeacher(teacher)}
-                            className="rounded-lg px-3 py-1.5 text-xs font-medium text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-950/30 transition-colors"
-                            title="Edit"
-                          >
-                            ✏️
-                          </button>
-                          <button
-                            onClick={() => handleDelete(teacher._id, `${teacher.profile?.firstName} ${teacher.profile?.lastName}`)}
-                            className="rounded-lg px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
-                            title="Delete"
-                          >
-                            🗑️
-                          </button>
-                        </div>
+                        <ThreeDotsMenu
+                          teacher={teacher}
+                          onEdit={() => setEditingTeacher(teacher)}
+                          onDelete={() => handleDelete(teacher._id, `${teacher.profile?.firstName} ${teacher.profile?.lastName}`)}
+                        />
                       </td>
                     </tr>
                   ))}

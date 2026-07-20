@@ -15,5 +15,6 @@ router.post('/', asyncHandler(teacherController.create));
 router.patch('/:id', asyncHandler(teacherController.update));
 router.delete('/:id', asyncHandler(teacherController.remove));
 router.patch('/:id/status', asyncHandler(teacherController.updateStatus));
+router.patch('/:id/course-permission', asyncHandler(teacherController.updateCoursePermission));
 
 export default router;

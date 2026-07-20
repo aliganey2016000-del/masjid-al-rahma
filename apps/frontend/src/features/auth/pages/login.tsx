@@ -51,10 +51,11 @@ export function LoginPage() {
     clearError();
     try {
       const userData: any = await login(data.email, data.password);
-      // Redirect based on role — org_admin and teacher share the admin
-      // portal shell (backend RBAC scopes what each can actually do there).
+      // Redirect based on role — teachers have their own sandboxed portal
+      // at /teacher, admins/org_admins at /admin.
       const role = userData?.role || 'student';
-      if (role === 'admin' || role === 'org_admin' || role === 'teacher') navigate('/admin');
+      if (role === 'teacher') navigate('/teacher');
+      else if (role === 'admin' || role === 'org_admin') navigate('/admin');
       else if (role === 'parent') navigate('/parent');
       else navigate('/student');
     } catch {

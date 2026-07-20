@@ -1,7 +1,8 @@
 /**
  * Auth Context
  *
- * Global authentication state — user info, login, register, logout.
+ * Global authentication state — user info, login, register, logout,
+ * and onboarding completion tracking.
  * Connects to backend API via Axios.
  */
 
@@ -26,6 +27,8 @@ interface User {
   isVerified: boolean;
   preferredLanguage: string;
   organizationId?: string;
+  organizationName?: string;
+  onboardingCompleted?: boolean;
 }
 
 interface AuthContextValue {
@@ -35,6 +38,7 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<User>;
   register: (data: RegisterData) => Promise<void>;
   logout: () => Promise<void>;
+  completeOnboarding: () => Promise<void>;
   error: string | null;
   clearError: () => void;
 }
@@ -54,21 +58,10 @@ interface RegisterData {
 // Normalize user data
 // ---------------------------------------------------------------------------
 
-/**
- * Normalize the user object shape as it comes in from different endpoints.
- *
- * - login / register: `organizationId` is a plain string (ObjectId)
- * - /auth/me (populated): `organizationId` is an object `{ _id, name }`
- * - Some endpoints may expose `_id` instead of `id`
- *
- * We always store organizationId as the raw string so downstream consumers
- * (like users-manage and the sidebar) can compare without type-gymnastics.
- */
 function normalizeUser(raw: any): User {
   let orgId: string | undefined;
 
   if (typeof raw.organizationId === 'object' && raw.organizationId !== null) {
-    // Populated School document: { _id: '...', name: '...' }
     orgId = (raw.organizationId._id || raw.organizationId).toString();
   } else if (raw.organizationId) {
     orgId = String(raw.organizationId);
@@ -81,7 +74,27 @@ function normalizeUser(raw: any): User {
     isVerified: raw.isVerified,
     preferredLanguage: raw.preferredLanguage || 'en',
     organizationId: orgId,
+    organizationName:
+      raw.organizationName ||
+      (typeof raw.organizationId === 'object' && raw.organizationId?.name) ||
+      undefined,
+    onboardingCompleted: raw.onboardingCompleted ?? true, // legacy: users without field see dashboard directly
   };
+}
+
+function clearAuthStorage() {
+  if (typeof window === 'undefined') return;
+  const keysToClear = [
+    'accessToken',
+    'tenant',
+    'tenantSlug',
+    'selectedTenant',
+    'activeTenant',
+  ];
+  keysToClear.forEach((key) => {
+    localStorage.removeItem(key);
+    sessionStorage.removeItem(key);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -99,10 +112,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // ------------------------------------------------------------------
-  // Check for existing session on mount
-  // ------------------------------------------------------------------
-
   useEffect(() => {
     const checkAuth = async () => {
       const token = localStorage.getItem('accessToken');
@@ -115,7 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const { data } = await api.get('/auth/me');
         setUser(normalizeUser(data.data?.user));
       } catch {
-        localStorage.removeItem('accessToken');
+        clearAuthStorage();
       } finally {
         setIsLoading(false);
       }
@@ -124,16 +133,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     checkAuth();
   }, []);
 
-  // ------------------------------------------------------------------
-  // Login
-  // ------------------------------------------------------------------
-
   const login = useCallback(async (email: string, password: string) => {
     setError(null);
     try {
       const { data } = await api.post('/auth/login', { email, password });
 
       if (data.success) {
+        clearAuthStorage();
         const accessToken = data.data?.accessToken;
         const userData = data.data?.user;
         localStorage.setItem('accessToken', accessToken);
@@ -151,10 +157,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // ------------------------------------------------------------------
-  // Register
-  // ------------------------------------------------------------------
-
   const register = useCallback(async (formData: RegisterData) => {
     setError(null);
     try {
@@ -165,6 +167,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
 
       if (data.success) {
+        clearAuthStorage();
         const accessToken = data.data?.accessToken;
         localStorage.setItem('accessToken', accessToken);
         setUser(normalizeUser(data.data?.user));
@@ -179,30 +182,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // ------------------------------------------------------------------
-  // Logout
-  // ------------------------------------------------------------------
-
   const logout = useCallback(async () => {
-    // Clear local session state and redirect immediately — the click must
-    // take effect right away regardless of how long the network call takes.
-    // The server-side call (invalidating the refresh token) happens in the
-    // background; a failure there shouldn't block the user from leaving.
-    localStorage.removeItem('accessToken');
+    clearAuthStorage();
     setUser(null);
     api.post('/auth/logout').catch(() => {});
     window.location.href = '/auth/login';
   }, []);
 
-  // ------------------------------------------------------------------
-  // Clear error
-  // ------------------------------------------------------------------
+  const completeOnboarding = useCallback(async () => {
+    // Optimistic update regardless of response shape/outcome — the caller
+    // (OnboardingWizard) dismisses the wizard right after this resolves, and
+    // if local state didn't flip here, the dashboard's onboardingCompleted
+    // check would re-show the wizard on the next mount, trapping the
+    // student in a repeating loop. Server sync is still attempted below;
+    // a failure here just means the flag re-syncs incorrectly on next
+    // login, which is far less harmful than the loop.
+    setUser(prev => prev ? { ...prev, onboardingCompleted: true } : null);
+    try {
+      await api.patch('/auth/me/onboarding-complete');
+    } catch (err: any) {
+      console.warn('Failed to mark onboarding complete:', err.message);
+    }
+  }, []);
 
   const clearError = useCallback(() => setError(null), []);
-
-  // ------------------------------------------------------------------
-  // Value
-  // ------------------------------------------------------------------
 
   const value: AuthContextValue = {
     user,
@@ -211,6 +214,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     login,
     register,
     logout,
+    completeOnboarding,
     error,
     clearError,
   };

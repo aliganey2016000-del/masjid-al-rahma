@@ -7,7 +7,7 @@
  */
 
 import { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useCourseContent } from './course-builder.api';
 import { LessonEditor } from './components/builder-lesson-editor';
 import type { CourseContent, LessonItem } from './course-builder.types';
@@ -19,10 +19,12 @@ export function LessonEditPage() {
   const navigate = useNavigate();
 
   const { content, loading, error, fetchContent, saveContent, updateContentLocally } = useCourseContent(courseId!);
+  const location = useLocation();
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
 
-  const backToBuilder = () => navigate(`/admin/courses/${courseId}/builder`);
+  const basePath = location.pathname.startsWith('/teacher') ? '/teacher' : '/admin';
+  const backToBuilder = () => navigate(`${basePath}/courses/${courseId}/builder`);
 
   // Locate the chapter + item indices for this lesson.
   let chapterIdx = -1;

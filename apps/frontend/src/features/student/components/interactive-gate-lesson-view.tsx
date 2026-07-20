@@ -23,6 +23,7 @@ import api from '../../../lib/axios';
 import type { LessonItem } from '../../admin/pages/course-builder.types';
 import { checkGateAnswerOffline } from '../../../lib/offline-gate';
 import { getGateProgress, patchGateProgress, queueAction, queueVideoProgress } from '../../../lib/offline-store';
+import { sanitizeHtml } from '../../../lib/sanitize-html';
 
 type Phase = 'loading' | 'reading' | 'ready' | 'question_open' | 'question_retry' | 'cleared';
 
@@ -114,6 +115,23 @@ export function InteractiveGateLessonView({ lesson, courseId, onGateCleared }: I
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [retryExplanation, setRetryExplanation] = useState('');
+  const [answerCache, setAnswerCache] = useState<Record<number, number | boolean | null>>({});
+  const [phaseCache, setPhaseCache] = useState<Record<number, Phase>>({});
+
+  const restoreBlockState = (index: number, fallbackPhase: Phase = 'reading') => {
+    setCurrentBlockIndex(index);
+    const cachedPhase = phaseCache[index] ?? fallbackPhase;
+    setPhase(cachedPhase);
+    const cachedAnswer = answerCache[index];
+    setSelectedAnswer(cachedAnswer !== undefined ? cachedAnswer : null);
+  };
+
+  useEffect(() => {
+    setPhaseCache((prev) => {
+      if (prev[currentBlockIndex] === phase) return prev;
+      return { ...prev, [currentBlockIndex]: phase };
+    });
+  }, [currentBlockIndex, phase]);
 
   // Video checkpoint progress, resumed from the same server call as block progress.
   const [maxTimeWatched, setMaxTimeWatched] = useState(0);
@@ -177,11 +195,11 @@ export function InteractiveGateLessonView({ lesson, courseId, onGateCleared }: I
       if (blocks.length === 0) {
         setPhase('cleared'); // no text blocks to gate — video (if any) still gates itself
       } else if (progress.gateCompleted) {
-        setPhase('cleared');
+        restoreBlockState(0, 'reading');
         onGateCleared();
       } else {
-        setCurrentBlockIndex(Math.min(progress.unlockedBlockIndex || 0, blocks.length - 1));
-        setPhase('reading');
+        const restoredIndex = Math.min(progress.unlockedBlockIndex || 0, blocks.length - 1);
+        restoreBlockState(restoredIndex, 'reading');
       }
     })();
     return () => { cancelled = true; };
@@ -264,9 +282,31 @@ export function InteractiveGateLessonView({ lesson, courseId, onGateCleared }: I
 
   const handleNext = () => {
     setRetryExplanation('');
-    setSelectedAnswer(null);
-    if (block.question) setPhase('question_open');
-    else void submitAnswer(true); // no question — advancing alone clears this block
+    if (block.question) {
+      setSelectedAnswer(answerCache[currentBlockIndex] ?? null);
+      setPhase('question_open');
+      setPhaseCache((prev) => ({ ...prev, [currentBlockIndex]: 'question_open' }));
+    } else {
+      setSelectedAnswer(null);
+      void submitAnswer(true); // no question — advancing alone clears this block
+    }
+  };
+
+  const goToPreviousBlock = () => {
+    if (currentBlockIndex === 0) return;
+    restoreBlockState(currentBlockIndex - 1, 'reading');
+  };
+
+  const goToNextBlock = () => {
+    if (currentBlockIndex >= totalBlocks - 1) return;
+    restoreBlockState(currentBlockIndex + 1, 'reading');
+  };
+
+  const persistCurrentAnswer = (value: number | boolean | null, nextPhase: Phase) => {
+    setAnswerCache((prev) => ({ ...prev, [currentBlockIndex]: value }));
+    setSelectedAnswer(value);
+    setPhaseCache((prev) => ({ ...prev, [currentBlockIndex]: nextPhase }));
+    setPhase(nextPhase);
   };
 
   const submitAnswer = async (advanceOnly = false) => {
@@ -290,6 +330,7 @@ export function InteractiveGateLessonView({ lesson, courseId, onGateCleared }: I
           : true;
 
         if (correct) {
+          setAnswerCache((prev) => ({ ...prev, [currentBlockIndex]: null }));
           setSelectedAnswer(null);
           setRetryExplanation('');
           await queueAction({ type: 'gate-block-answer', url, body: { answer: answerToSubmit } });
@@ -332,7 +373,7 @@ export function InteractiveGateLessonView({ lesson, courseId, onGateCleared }: I
         }
       } else {
         setRetryExplanation(data.data.explanation || '');
-        setPhase('question_retry');
+        persistCurrentAnswer(answerToSubmit, 'question_retry');
       }
     } catch (err: any) {
       setError(err.response?.data?.message || 'Something went wrong — please try again.');
@@ -372,25 +413,45 @@ export function InteractiveGateLessonView({ lesson, courseId, onGateCleared }: I
           )}
           <div
             className="prose prose-sm dark:prose-invert max-w-none text-[var(--color-text-primary)] [&_p]:mb-3 [&_p]:leading-relaxed"
-            dangerouslySetInnerHTML={{ __html: block.content }}
+            dangerouslySetInnerHTML={{ __html: sanitizeHtml(block.content) }}
           />
 
           {(phase === 'reading' || phase === 'ready') && (
-            <div className="flex items-center justify-between pt-2 border-t border-[var(--color-border-subtle)]">
-              {phase === 'reading' ? (
-                <span className="text-xs text-[var(--color-text-tertiary)] flex items-center gap-1.5">
-                  <span className="inline-block h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
-                  Keep reading — Next unlocks in {secondsRemaining}s
-                </span>
-              ) : <span />}
-              <button
-                type="button"
-                onClick={handleNext}
-                disabled={phase === 'reading'}
-                className="rounded-xl bg-primary-600 px-5 py-2 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
-              >
-                {block.question ? 'Next → Question' : isLastBlock ? 'Finish' : 'Next'}
-              </button>
+            <div className="flex items-center justify-between gap-3 pt-2 border-t border-[var(--color-border-subtle)]">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={goToPreviousBlock}
+                  disabled={currentBlockIndex === 0}
+                  className="rounded-xl border border-[var(--color-border-default)] px-4 py-2 text-sm font-semibold text-[var(--color-text-primary)] hover:bg-[var(--color-surface-tertiary)] disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                >
+                  ← Previous
+                </button>
+                {phase === 'reading' ? (
+                  <span className="text-xs text-[var(--color-text-tertiary)] flex items-center gap-1.5">
+                    <span className="inline-block h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
+                    Keep reading — Next unlocks in {secondsRemaining}s
+                  </span>
+                ) : <span />}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={goToNextBlock}
+                  disabled={currentBlockIndex >= totalBlocks - 1}
+                  className="rounded-xl border border-[var(--color-border-default)] px-4 py-2 text-sm font-semibold text-[var(--color-text-primary)] hover:bg-[var(--color-surface-tertiary)] disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                >
+                  Next →
+                </button>
+                <button
+                  type="button"
+                  onClick={handleNext}
+                  disabled={phase === 'reading'}
+                  className="rounded-xl bg-primary-600 px-5 py-2 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                >
+                  {block.question ? 'Next → Question' : isLastBlock ? 'Finish' : 'Next'}
+                </button>
+              </div>
             </div>
           )}
 
@@ -417,7 +478,7 @@ export function InteractiveGateLessonView({ lesson, courseId, onGateCleared }: I
                     <button
                       key={i}
                       type="button"
-                      onClick={() => setSelectedAnswer(i)}
+                      onClick={() => persistCurrentAnswer(i, phase === 'question_retry' ? 'question_retry' : 'question_open')}
                       className={`w-full text-left rounded-lg border px-3 py-2 text-sm transition-colors ${
                         selectedAnswer === i
                           ? 'border-primary-500 bg-primary-50 dark:bg-primary-950/30 text-primary-700 dark:text-primary-300'
@@ -434,7 +495,7 @@ export function InteractiveGateLessonView({ lesson, courseId, onGateCleared }: I
                     <button
                       key={String(val)}
                       type="button"
-                      onClick={() => setSelectedAnswer(val)}
+                      onClick={() => persistCurrentAnswer(val, phase === 'question_retry' ? 'question_retry' : 'question_open')}
                       className={`flex-1 rounded-lg border px-3 py-2 text-sm font-semibold transition-colors ${
                         selectedAnswer === val
                           ? 'border-primary-500 bg-primary-50 dark:bg-primary-950/30 text-primary-700 dark:text-primary-300'

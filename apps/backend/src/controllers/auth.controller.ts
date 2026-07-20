@@ -22,6 +22,44 @@ import {
 } from '../utils/api-error';
 import ApiResponse from '../utils/api-response';
 
+interface OrganizationPayload {
+  organizationId?: string;
+  organizationName?: string;
+}
+
+async function resolveEffectiveOrganization(user: any): Promise<OrganizationPayload> {
+  if (!user) return {};
+
+  if (user.role === 'student') {
+    const student = await Student.findOne({ user: user._id }).populate('school', 'name').lean();
+    if (student?.school) {
+      const school = student.school as any;
+      return {
+        organizationId: school._id?.toString() || student.school.toString(),
+        organizationName: school.name,
+      };
+    }
+  }
+
+  if (user.organizationId) {
+    if (typeof user.organizationId === 'object' && user.organizationId !== null) {
+      const org = user.organizationId as any;
+      return {
+        organizationId: org._id?.toString() || org.toString(),
+        organizationName: org?.name,
+      };
+    }
+
+    const org = await School.findById(user.organizationId).select('name').lean();
+    return {
+      organizationId: user.organizationId.toString(),
+      organizationName: org?.name,
+    };
+  }
+
+  return {};
+}
+
 // ---------------------------------------------------------------------------
 // Register
 // ---------------------------------------------------------------------------
@@ -131,13 +169,14 @@ export const register = async (req: Request, res: Response): Promise<Response> =
     ]);
   }
 
-  // 5. Generate tokens (self-registered students get org from Student doc,
-  //    not from user.organizationId — admin-created users get it via the admin flow)
+  // 5. Generate tokens with the resolved tenant/school binding.
+  const effectiveOrg = await resolveEffectiveOrganization(user);
   const tokenPair = generateTokenPair(
     {
       userId: user._id.toString(),
       role: user.role,
       permissions: [],
+      organizationId: effectiveOrg.organizationId,
     },
     { userId: user._id.toString(), tokenVersion: user.tokenVersion }
   );
@@ -168,7 +207,9 @@ export const register = async (req: Request, res: Response): Promise<Response> =
         role: user.role,
         isVerified: user.isVerified,
         preferredLanguage: user.preferredLanguage,
-        organizationId: user.organizationId,
+        organizationId: effectiveOrg.organizationId,
+        organizationName: effectiveOrg.organizationName,
+        onboardingCompleted: user.onboardingCompleted,
       },
       accessToken: tokenPair.accessToken,
     },
@@ -226,13 +267,15 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
   user.lockedUntil = undefined;
   user.lastLogin = new Date();
 
-  // 6. Generate token pair (include organizationId for org_admin)
+  const effectiveOrg = await resolveEffectiveOrganization(user);
+
+  // 6. Generate token pair (include resolved tenant binding)
   const tokenPair = generateTokenPair(
     {
       userId: user._id.toString(),
       role: user.role,
       permissions: [], // Will be populated from Role model in production
-      organizationId: user.organizationId?.toString(),
+      organizationId: effectiveOrg.organizationId,
     },
     { userId: user._id.toString(), tokenVersion: user.tokenVersion }
   );
@@ -270,7 +313,9 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
         role: user.role,
         isVerified: user.isVerified,
         preferredLanguage: user.preferredLanguage,
-        organizationId: user.organizationId,
+        organizationId: effectiveOrg.organizationId,
+        organizationName: effectiveOrg.organizationName,
+        onboardingCompleted: user.onboardingCompleted,
       },
       accessToken: tokenPair.accessToken,
     },
@@ -374,12 +419,14 @@ export const refreshToken = async (req: Request, res: Response): Promise<Respons
     (t) => t !== hashedOldToken
   );
 
+  const effectiveOrg = await resolveEffectiveOrganization(user);
+
   const newTokenPair = generateTokenPair(
     {
       userId: user._id.toString(),
       role: user.role,
       permissions: [],
-      organizationId: user.organizationId?.toString(),
+      organizationId: effectiveOrg.organizationId,
     },
     { userId: user._id.toString(), tokenVersion: user.tokenVersion }
   );
@@ -417,9 +464,16 @@ export const getMe = async (req: Request, res: Response): Promise<Response> => {
   }
 
   const profile = await Profile.findOne({ user: user._id });
+  const effectiveOrg = await resolveEffectiveOrganization(user);
+
+  const normalizedUser = {
+    ...user.toObject(),
+    organizationId: effectiveOrg.organizationId,
+    organizationName: effectiveOrg.organizationName,
+  };
 
   return ApiResponse.success(res, {
-    user,
+    user: normalizedUser,
     profile,
   });
 };
@@ -569,4 +623,32 @@ export const changePassword = async (req: Request, res: Response): Promise<Respo
     null,
     'Password changed successfully. Please login again.'
   );
+};
+
+// ---------------------------------------------------------------------------
+// Complete Onboarding
+// ---------------------------------------------------------------------------
+
+export const completeOnboarding = async (req: Request, res: Response): Promise<Response> => {
+  const user = await User.findByIdAndUpdate(
+    req.user!.userId,
+    { onboardingCompleted: true },
+    { new: true },
+  );
+
+  if (!user) {
+    throw new NotFoundError('User');
+  }
+
+  return ApiResponse.success(res, {
+    user: {
+      id: user._id,
+      email: user.email,
+      role: user.role,
+      isVerified: user.isVerified,
+      preferredLanguage: user.preferredLanguage,
+      organizationId: user.organizationId,
+      onboardingCompleted: user.onboardingCompleted,
+    },
+  }, 'Onboarding wizard completed');
 };

@@ -1,8 +1,9 @@
 /**
  * Main Route Configuration
  *
- * Combines public, auth, admin, student, and parent routes.
+ * Combines public, auth, admin, student, parent, and teacher routes.
  * Uses createBrowserRouter for React Router v6 data API.
+ * Teacher portal is strictly sandboxed — no admin routes or finance access.
  */
 
 import { createBrowserRouter } from 'react-router-dom';
@@ -92,8 +93,13 @@ const StudentQuizTake = lazy(() =>
 const StudentAnalytics = lazy(() =>
   import('../features/student/pages/student-analytics').then((m) => ({ default: m.StudentAnalytics }))
 );
+
+// ── Admin Portal ──
 const AdminLayout = lazy(() =>
   import('../features/admin/components/admin-layout').then((m) => ({ default: m.AdminLayout }))
+);
+const AdminGuard = lazy(() =>
+  import('../features/admin/components/admin-guard').then((m) => ({ default: m.AdminGuard }))
 );
 const ParentLayout = lazy(() =>
   import('../features/parent/components/parent-layout').then((m) => ({ default: m.ParentLayout }))
@@ -219,6 +225,45 @@ const ForumPage = lazy(() =>
   import('../features/shared/pages/forum-page').then((m) => ({ default: m.ForumPage }))
 );
 
+// ── Teacher Portal ──
+const TeacherLayout = lazy(() =>
+  import('../features/teacher/components/teacher-layout').then((m) => ({ default: m.TeacherLayout }))
+);
+const TeacherGuard = lazy(() =>
+  import('../features/teacher/components/teacher-guard').then((m) => ({ default: m.TeacherGuard }))
+);
+const TeacherDashboard = lazy(() =>
+  import('../features/teacher/pages/teacher-dashboard').then((m) => ({ default: m.TeacherDashboard }))
+);
+const TeacherCourses = lazy(() =>
+  import('../features/teacher/pages/teacher-courses').then((m) => ({ default: m.TeacherCourses }))
+);
+const TeacherQuizzes = lazy(() =>
+  import('../features/teacher/pages/teacher-quizzes').then((m) => ({ default: m.TeacherQuizzes }))
+);
+const TeacherLessons = lazy(() =>
+  import('../features/teacher/pages/teacher-lessons').then((m) => ({ default: m.TeacherLessons }))
+);
+const TeacherGradebook = lazy(() =>
+  import('../features/teacher/pages/teacher-gradebook').then((m) => ({ default: m.TeacherGradebook }))
+);
+const TeacherStudents = lazy(() =>
+  import('../features/teacher/pages/teacher-students').then((m) => ({ default: m.TeacherStudents }))
+);
+const TeacherAnalytics = lazy(() =>
+  import('../features/teacher/pages/teacher-analytics').then((m) => ({ default: m.TeacherAnalytics }))
+);
+const TeacherCourseBuilder = lazy(() =>
+  import('../features/teacher/pages/teacher-course-builder').then((m) => ({ default: m.TeacherCourseBuilder }))
+);
+// Reuse admin edit pages for teacher portal (they work with course content API)
+const TeacherLessonEditPage = lazy(() =>
+  import('../features/admin/pages/lesson-edit-page').then((m) => ({ default: m.LessonEditPage }))
+);
+const TeacherQuizEditPage = lazy(() =>
+  import('../features/admin/pages/quiz-edit-page').then((m) => ({ default: m.QuizEditPage }))
+);
+
 function PageLoader() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-[var(--color-surface-primary)]">
@@ -230,14 +275,10 @@ function PageLoader() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// All routes helper — wraps element in Suspense
-// ---------------------------------------------------------------------------
-
 const L = (el: JSX.Element) => <Suspense fallback={<PageLoader />}>{el}</Suspense>;
 
 // ---------------------------------------------------------------------------
-// Router Instance
+// Router
 // ---------------------------------------------------------------------------
 
 export const router = createBrowserRouter([
@@ -278,10 +319,10 @@ export const router = createBrowserRouter([
     ],
   },
 
-  // ── Admin Portal (shared with teachers) ──
+  // ── Admin Portal (guarded: teachers/students/parents evicted to their portals) ──
   {
     path: 'admin',
-    element: L(<AdminLayout />),
+    element: L(<AdminGuard><AdminLayout /></AdminGuard>),
     children: [
       { index: true, element: L(<AdminDashboard />) },
       { path: 'students', element: L(<StudentsManage />) },
@@ -326,6 +367,34 @@ export const router = createBrowserRouter([
       { path: 'logs', element: L(<ActivityLogsManage />) },
       { path: 'forum', element: L(<ForumPage />) },
       { path: 'profile', element: L(<ProfileManage />) },
+    ],
+  },
+
+  // ── Teacher Portal (STRICTLY SANDBOXED — RBAC Guard) ──
+  {
+    path: 'teacher',
+    element: L(<TeacherGuard><TeacherLayout /></TeacherGuard>),
+    children: [
+      { index: true, element: L(<TeacherDashboard />) },
+      { path: 'courses', element: L(<TeacherCourses />) },
+      { path: 'courses/:courseId', element: L(<TeacherAnalytics />) },
+      // ✅ COURSE_BUILDER permission: Full course authoring (chapters, lessons, quizzes, assignments)
+      // Route guard in TeacherCourseBuilder checks permission and redirects to student view if denied
+      { path: 'courses/:courseId/builder', element: L(<TeacherCourseBuilder />) },
+      { path: 'courses/:courseId/lessons/:lessonId/edit', element: L(<TeacherLessonEditPage />) },
+      { path: 'courses/:courseId/quizzes/:quizId/edit', element: L(<TeacherQuizEditPage />) },
+      { path: 'quizzes', element: L(<TeacherQuizzes />) },
+      { path: 'quizzes/create', element: L(<TeacherQuizzes />) },
+      { path: 'lessons', element: L(<TeacherLessons />) },
+      { path: 'gradebook', element: L(<TeacherGradebook />) },
+      { path: 'gradebook/review', element: L(<TeacherGradebook />) },
+      { path: 'students', element: L(<TeacherStudents />) },
+      { path: 'gamification', element: L(<TeacherStudents />) },
+      { path: 'analytics', element: L(<TeacherAnalytics />) },
+      { path: 'forum', element: L(<ForumPage />) },
+      { path: 'profile', element: L(<PortalPage />) },
+      { path: 'settings', element: L(<PortalPage />) },
+      { path: 'assignments', element: L(<PortalPage />) },
     ],
   },
 

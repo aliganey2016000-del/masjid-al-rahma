@@ -23,7 +23,12 @@ dotenv.config({ path: fs.existsSync(localEnvPath) ? localEnvPath : prodEnvPath }
 // Register all models before routes are loaded
 
 const PORT = process.env.PORT || 5000;
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://rayan2016003_db_user:635110Liiali@rahma.bo0elay.mongodb.net/masjid-al-rahma?appName=rahma&retryWrites=true&w=majority';
+
+if (!process.env.MONGODB_URI) {
+  console.error('❌ MONGODB_URI is not set. Add it to backend/.env (local) or backend/.env.production.');
+  process.exit(1);
+}
+const MONGODB_URI: string = process.env.MONGODB_URI;
 
 // ---------------------------------------------------------------------------
 // Database Connection & Server Start

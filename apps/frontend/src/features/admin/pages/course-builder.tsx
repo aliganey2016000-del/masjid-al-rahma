@@ -45,9 +45,18 @@ const itemTypeMeta: Record<string, { icon: string; label: string; color: string 
 };
 
 // ---------------------------------------------------------------------------
+// Props
+// ---------------------------------------------------------------------------
+interface CourseBuilderProps {
+  /** Base path for navigation. Defaults to '/admin' for admin portal.
+   *  Set to '/teacher' when used inside the teacher portal. */
+  basePath?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Main Component
 // ---------------------------------------------------------------------------
-export function CourseBuilder() {
+export function CourseBuilder({ basePath = '/admin' }: CourseBuilderProps) {
   const { courseId } = useParams<{ courseId: string }>();
   const navigate = useNavigate();
 
@@ -258,7 +267,7 @@ export function CourseBuilder() {
       // lesson/quiz via a fresh fetch right after navigating.
       try {
         await saveContent(newContent);
-        navigate(`/admin/courses/${courseId}/${type === 'lesson' ? 'lessons' : 'quizzes'}/${baseItem._id}/edit`);
+      navigate(`${basePath}/courses/${courseId}/${type === 'lesson' ? 'lessons' : 'quizzes'}/${baseItem._id}/edit`);
       } catch {
         showToast(`Failed to create ${type}. Please try again.`, 'error');
       }
@@ -519,7 +528,7 @@ export function CourseBuilder() {
         >
           <div>
             <button
-              onClick={() => navigate('/admin/courses')}
+              onClick={() => navigate(`${basePath}/courses`)}
               className="text-xs font-medium text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] transition-colors mb-1 flex items-center gap-1"
             >
               ← Back to Courses
@@ -806,11 +815,11 @@ export function CourseBuilder() {
                             {/* Title + meta */}
                             <div
                               className={`flex-1 min-w-0 ${item.type === 'lesson' || item.type === 'quiz' ? 'cursor-pointer' : ''}`}
-                              onClick={() => {
+                            onClick={() => {
                                 if (item.type === 'lesson') {
-                                  navigate(`/admin/courses/${courseId}/lessons/${item._id}/edit`);
+                                  navigate(`${basePath}/courses/${courseId}/lessons/${item._id}/edit`);
                                 } else if (item.type === 'quiz') {
-                                  navigate(`/admin/courses/${courseId}/quizzes/${item._id}/edit`);
+                                  navigate(`${basePath}/courses/${courseId}/quizzes/${item._id}/edit`);
                                 }
                               }}
                             >
@@ -846,8 +855,8 @@ export function CourseBuilder() {
                             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                               <button
                                 onClick={() => {
-                                  if (item.type === 'lesson') navigate(`/admin/courses/${courseId}/lessons/${item._id}/edit`);
-                                  else if (item.type === 'quiz') navigate(`/admin/courses/${courseId}/quizzes/${item._id}/edit`);
+                                  if (item.type === 'lesson') navigate(`${basePath}/courses/${courseId}/lessons/${item._id}/edit`);
+                                  else if (item.type === 'quiz') navigate(`${basePath}/courses/${courseId}/quizzes/${item._id}/edit`);
                                   else setEditingItem({ chapterIdx: chIdx, itemIdx });
                                 }}
                                 className="h-7 w-7 flex items-center justify-center rounded-lg text-[var(--color-text-tertiary)] hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-950/30 transition-colors text-xs"

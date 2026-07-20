@@ -32,6 +32,7 @@ export interface IUser extends Document {
   passwordResetExpires?: Date;
   failedLoginAttempts: number;
   lockedUntil?: Date;
+  onboardingCompleted: boolean;     // true once user completes welcome wizard
   createdAt: Date;
   updatedAt: Date;
 
@@ -80,9 +81,8 @@ const userSchema = new Schema<IUser, IUserModel>(
       required: [true, 'Role is required'],
       enum: {
         values: ['admin', 'teacher', 'student', 'parent', 'org_admin'],
-        message: '{VALUE} is not a valid role',
+        message: 'Role must be one of: admin, teacher, student, parent, org_admin',
       },
-      index: true,
     },
     organizationId: {
       type: Schema.Types.ObjectId,
@@ -97,7 +97,6 @@ const userSchema = new Schema<IUser, IUserModel>(
     isActive: {
       type: Boolean,
       default: true,
-      index: true,
     },
     lastLogin: {
       type: Date,
@@ -110,8 +109,8 @@ const userSchema = new Schema<IUser, IUserModel>(
     },
     refreshTokens: {
       type: [String],
-      default: [],
       select: false,
+      default: [],
     },
     tokenVersion: {
       type: Number,
@@ -144,35 +143,37 @@ const userSchema = new Schema<IUser, IUserModel>(
       default: null,
       select: false,
     },
+    onboardingCompleted: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true,
     toJSON: {
       transform(_doc: any, ret: any) {
-        ret.password = undefined;
-        ret.refreshTokens = undefined;
-        ret.tokenVersion = undefined;
-        ret.verificationToken = undefined;
-        ret.verificationTokenExpires = undefined;
-        ret.passwordResetToken = undefined;
-        ret.passwordResetExpires = undefined;
-        ret.failedLoginAttempts = undefined;
-        ret.lockedUntil = undefined;
         delete ret.__v;
+        delete ret.password;
+        delete ret.refreshTokens;
+        delete ret.tokenVersion;
+        delete ret.verificationToken;
+        delete ret.verificationTokenExpires;
+        delete ret.passwordResetToken;
+        delete ret.passwordResetExpires;
+        delete ret.failedLoginAttempts;
+        delete ret.lockedUntil;
         return ret;
       },
     },
   }
 );
 
-// (Indexes are declared inline on the schema fields above — email, phone, role, isActive)
-
 // ---------------------------------------------------------------------------
-// Pre-save Hook — Hash password & email verification token
+// Password Hashing Middleware
 // ---------------------------------------------------------------------------
 
 userSchema.pre<IUser>('save', async function (next) {
-  // Only hash password if it has been modified (or is new)
+  // Only hash if password was modified (or is new)
   if (!this.isModified('password')) return next();
 
   try {
@@ -188,39 +189,34 @@ userSchema.pre<IUser>('save', async function (next) {
 // Instance Methods
 // ---------------------------------------------------------------------------
 
-/**
- * Compare a candidate password against the stored hash.
- */
+/** Compare a plain-text password against the stored hash. */
 userSchema.methods.comparePassword = async function (
   candidatePassword: string
 ): Promise<boolean> {
   return bcrypt.compare(candidatePassword, this.password);
 };
 
-/**
- * Check if the account is temporarily locked due to too many failed attempts.
- */
+/** Check if the account is temporarily locked due to excessive failed logins. */
 userSchema.methods.isLocked = function (): boolean {
   if (!this.lockedUntil) return false;
-  // If lock period has passed, unlock automatically
-  if (this.lockedUntil < new Date()) {
-    this.lockedUntil = undefined;
-    this.failedLoginAttempts = 0;
-    return false;
-  }
-  return true;
+  return new Date() < this.lockedUntil;
 };
 
 // ---------------------------------------------------------------------------
 // Static Methods
 // ---------------------------------------------------------------------------
 
-/**
- * Hash a token (used for refresh tokens stored in the user document).
- */
+/** Hash a refresh token for secure storage. */
 userSchema.statics.hashToken = function (token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
 };
+
+// ---------------------------------------------------------------------------
+// Indexes
+// ---------------------------------------------------------------------------
+
+userSchema.index({ role: 1 });
+userSchema.index({ isActive: 1 });
 
 // ---------------------------------------------------------------------------
 // Model Export

@@ -404,6 +404,7 @@ interface CourseCardProps {
   onPreview: (course: Course) => void;
   onSetAccessMode: (course: Course) => void;
   onSetVideoGating: (course: Course) => void;
+  onTeacherPermission: (course: Course) => void;
 }
 
 function CourseCard({
@@ -418,6 +419,7 @@ function CourseCard({
   onPreview,
   onSetAccessMode,
   onSetVideoGating,
+  onTeacherPermission,
 }: CourseCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -534,6 +536,15 @@ function CourseCard({
                 >
                   <span className="w-4 text-center flex-shrink-0">{course.accessMode === 'restricted' ? '🔒' : '🔓'}</span>
                   <span>Course Progression Settings</span>
+                </button>
+
+                {/* Teacher Content Permission */}
+                <button
+                  onClick={() => handleAction(() => onTeacherPermission(course))}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-surface-tertiary)] transition-colors text-left"
+                >
+                  <span className="w-4 text-center flex-shrink-0">🔐</span>
+                  <span>Teacher Content Permission</span>
                 </button>
 
                 {/* Video-Gated Lesson Settings */}
@@ -674,6 +685,160 @@ function InfoRow({ icon, label, value, highlight }: { icon: string; label: strin
       <span className={`text-xs font-medium truncate ${highlight ? 'text-green-600 dark:text-green-400' : 'text-[var(--color-text-primary)]'}`}>
         {value}
       </span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Teacher Content Permission Modal
+// ---------------------------------------------------------------------------
+
+function TeacherPermissionModal({
+  teacherId,
+  teacherName,
+  courseTitle,
+  onClose,
+  onSaved,
+}: {
+  teacherId: string;
+  teacherName: string;
+  courseTitle: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [currentPerm, setCurrentPerm] = useState<string>('COURSE_BUILDER');
+  const [selected, setSelected] = useState<string>('COURSE_BUILDER');
+  const [loading, setLoading] = useState(false);
+  const [fetching, setFetching] = useState(true);
+  const [error, setError] = useState('');
+
+  // Fetch current permission on open
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data } = await api.get(`/teachers/${teacherId}`);
+        const perm = data.data?.coursePermission || 'COURSE_BUILDER';
+        setCurrentPerm(perm);
+        setSelected(perm);
+      } catch {
+        setError('Failed to load current permission');
+      } finally {
+        setFetching(false);
+      }
+    })();
+  }, [teacherId]);
+
+  const handleSave = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      await api.patch(`/teachers/${teacherId}/course-permission`, { coursePermission: selected });
+      onSaved();
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to update permission');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-[var(--color-surface-primary)] rounded-2xl p-6 w-full max-w-sm shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <h2 className="text-lg font-bold text-[var(--color-text-primary)] mb-1">
+          🔐 Teacher Content Permission
+        </h2>
+        <p className="text-xs text-[var(--color-text-tertiary)] mb-1">
+          <span className="font-semibold text-[var(--color-text-primary)]">{teacherName}</span> — {courseTitle}
+        </p>
+        {currentPerm && !fetching && (
+          <p className="text-[10px] text-[var(--color-text-tertiary)] mb-4">
+            Current: <span className={`font-bold ${currentPerm === 'COURSE_BUILDER' ? 'text-emerald-600' : 'text-amber-600'}`}>
+              {currentPerm === 'COURSE_BUILDER' ? 'Course Builder' : 'Student View'}
+            </span>
+          </p>
+        )}
+
+        {fetching && (
+          <div className="flex justify-center py-8">
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--color-border-default)] border-t-emerald-600" />
+          </div>
+        )}
+
+        {error && <p className="text-red-500 text-xs mb-3 bg-red-50 dark:bg-red-950/30 rounded-lg px-3 py-2">{error}</p>}
+
+        {!fetching && (
+          <>
+            <div className="space-y-2">
+              <button
+                onClick={() => setSelected('COURSE_BUILDER')}
+                disabled={loading}
+                className={`w-full flex items-start gap-3 rounded-xl border-2 p-4 cursor-pointer transition-all text-left ${
+                  selected === 'COURSE_BUILDER'
+                    ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30'
+                    : 'border-[var(--color-border-default)] hover:border-emerald-300'
+                }`}
+              >
+                <div className={`w-4 h-4 mt-0.5 rounded-full border-2 flex-shrink-0 ${
+                  selected === 'COURSE_BUILDER' ? 'border-emerald-600 bg-emerald-600' : 'border-[var(--color-border-default)]'
+                }`}>
+                  {selected === 'COURSE_BUILDER' && <div className="w-1.5 h-1.5 bg-white rounded-full m-auto mt-0.5" />}
+                </div>
+                <div>
+                  <span className={`text-sm font-semibold ${selected === 'COURSE_BUILDER' ? 'text-emerald-700 dark:text-emerald-300' : 'text-[var(--color-text-primary)]'}`}>
+                    Course Builder
+                  </span>
+                  <p className="text-[10px] text-[var(--color-text-tertiary)] mt-0.5">
+                    Full write/edit access to course structure, chapters, and content blocks.
+                  </p>
+                </div>
+              </button>
+
+              <button
+                onClick={() => setSelected('STUDENT_VIEW')}
+                disabled={loading}
+                className={`w-full flex items-start gap-3 rounded-xl border-2 p-4 cursor-pointer transition-all text-left ${
+                  selected === 'STUDENT_VIEW'
+                    ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/30'
+                    : 'border-[var(--color-border-default)] hover:border-amber-300'
+                }`}
+              >
+                <div className={`w-4 h-4 mt-0.5 rounded-full border-2 flex-shrink-0 ${
+                  selected === 'STUDENT_VIEW' ? 'border-amber-600 bg-amber-600' : 'border-[var(--color-border-default)]'
+                }`}>
+                  {selected === 'STUDENT_VIEW' && <div className="w-1.5 h-1.5 bg-white rounded-full m-auto mt-0.5" />}
+                </div>
+                <div>
+                  <span className={`text-sm font-semibold ${selected === 'STUDENT_VIEW' ? 'text-amber-700 dark:text-amber-300' : 'text-[var(--color-text-primary)]'}`}>
+                    Student View
+                  </span>
+                  <p className="text-[10px] text-[var(--color-text-tertiary)] mt-0.5">
+                    Read-only access. Same view as a student — no editing or saving allowed.
+                  </p>
+                </div>
+              </button>
+            </div>
+
+            <div className="flex gap-2 mt-5">
+              <button onClick={onClose} disabled={loading} className="flex-1 rounded-xl border border-[var(--color-border-default)] px-4 py-2.5 text-xs font-medium hover:bg-[var(--color-surface-tertiary)] transition-colors">
+                Cancel
+              </button>
+              <button onClick={handleSave} disabled={loading || selected === currentPerm}
+                className={`flex-1 rounded-xl px-4 py-2.5 text-xs font-semibold transition-colors ${
+                  selected === currentPerm
+                    ? 'bg-[var(--color-surface-tertiary)] text-[var(--color-text-tertiary)] cursor-not-allowed'
+                    : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                }`}>
+                {loading ? (
+                  <span className="inline-flex items-center gap-1">
+                    <div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    Saving...
+                  </span>
+                ) : selected === currentPerm ? 'Already Set' : 'Save'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -889,6 +1054,16 @@ export function CoursesManage() {
     setCourses((prev) => prev.map((c) => (c._id === id ? { ...c, accessMode } : c)));
   };
 
+  const [permCourse, setPermCourse] = useState<Course | undefined>(undefined);
+
+  const handleTeacherPermission = (course: Course) => {
+    if (!course.teacher?._id) {
+      alert('This course has no teacher assigned. Please assign a teacher first.');
+      return;
+    }
+    setPermCourse(course);
+  };
+
   const handleOpenVideoGating = async (course: Course) => {
     setVideoGatedCourse(course);
     setVideoGatingSettings(undefined);
@@ -1024,6 +1199,7 @@ export function CoursesManage() {
                 onPreview={handlePreview}
                 onSetAccessMode={setAccessModeCourse}
                 onSetVideoGating={handleOpenVideoGating}
+                onTeacherPermission={handleTeacherPermission}
               />
             ))}
           </div>
@@ -1056,6 +1232,19 @@ export function CoursesManage() {
           course={accessModeCourse}
           onClose={() => setAccessModeCourse(undefined)}
           onSave={handleSaveAccessMode}
+        />
+      )}
+
+      {/* Teacher Content Permission Modal */}
+      {permCourse && permCourse.teacher && (
+        <TeacherPermissionModal
+          teacherId={permCourse.teacher._id}
+          teacherName={`${permCourse.teacher.profile?.firstName || ''} ${permCourse.teacher.profile?.lastName || ''}`}
+          courseTitle={permCourse.title.en}
+          onClose={() => setPermCourse(undefined)}
+          onSaved={() => {
+            setPermCourse(undefined);
+          }}
         />
       )}
 

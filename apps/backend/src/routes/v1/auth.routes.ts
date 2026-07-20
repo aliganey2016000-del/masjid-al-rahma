@@ -102,6 +102,13 @@ router.patch(
   asyncHandler(authController.updatePreferences)
 );
 
+// PATCH /api/v1/auth/me/onboarding-complete — Mark onboarding wizard as done
+router.patch(
+  '/me/onboarding-complete',
+  authMiddleware,
+  asyncHandler(authController.completeOnboarding)
+);
+
 // PATCH /api/v1/auth/change-password
 router.patch(
   '/change-password',

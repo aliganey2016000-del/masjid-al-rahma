@@ -38,6 +38,7 @@ import classScheduleRoutes from './class-schedule.routes';
 import gamificationRoutes from './gamification.routes';
 import searchRoutes from './search.routes';
 import quizRoutes from './quiz.routes';
+import teacherPortalRoutes from './teacher-portal.routes';
 import pushRoutes from './push.routes';
 
 const router = Router();
@@ -81,6 +82,7 @@ router.use('/users', userRoutes);
 router.use('/class-schedules', classScheduleRoutes);
 router.use('/gamification', gamificationRoutes);
 router.use('/search', searchRoutes);
+router.use('/teacher-portal', teacherPortalRoutes);
 router.use('/push', pushRoutes);
 
 // ---------------------------------------------------------------------------

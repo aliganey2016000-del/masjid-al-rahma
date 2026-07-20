@@ -6,8 +6,15 @@ export interface IAssignmentSubmission extends Document {
   course: mongoose.Types.ObjectId;
   answer: string;
   fileUrl: string;
+  content?: string;
+  files?: { name: string; url: string; type: string }[];
   isLate: boolean;
   submittedAt: Date;
+  status: 'submitted' | 'graded' | 'returned';
+  score?: number;
+  feedback?: string;
+  gradedAt?: Date;
+  gradedBy?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -19,8 +26,15 @@ const schema = new Schema<IAssignmentSubmission>(
     course: { type: Schema.Types.ObjectId, ref: 'Course', required: true },
     answer: { type: String, default: '' },
     fileUrl: { type: String, default: '' },
+    content: { type: String, default: '' },
+    files: [{ name: String, url: String, type: String }],
     isLate: { type: Boolean, default: false },
     submittedAt: { type: Date, default: Date.now },
+    status: { type: String, enum: ['submitted', 'graded', 'returned'], default: 'submitted' },
+    score: { type: Number, default: null },
+    feedback: { type: String, default: '' },
+    gradedAt: { type: Date, default: null },
+    gradedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
   },
   { timestamps: true, toJSON: { transform(_d: any, r: any) { delete r.__v; return r; } } }
 );

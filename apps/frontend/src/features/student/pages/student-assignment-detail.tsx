@@ -12,6 +12,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import api from '../../../lib/axios';
+import { sanitizeHtml } from '../../../lib/sanitize-html';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -419,7 +420,7 @@ export function StudentAssignmentDetail() {
                 [&_code]:bg-slate-100 [&_code]:dark:bg-slate-800/50 [&_code]:rounded [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-xs [&_code]:font-mono
                 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-[var(--color-border-default)] [&_td]:p-2
                 [&_th]:border [&_th]:border-[var(--color-border-default)] [&_th]:p-2 [&_th]:bg-[var(--color-surface-tertiary)] [&_th]:text-left"
-              dangerouslySetInnerHTML={{ __html: assignment.description }}
+              dangerouslySetInnerHTML={{ __html: sanitizeHtml(assignment.description) }}
             />
           </div>
         )}

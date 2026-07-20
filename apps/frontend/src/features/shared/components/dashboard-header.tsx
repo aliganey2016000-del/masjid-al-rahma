@@ -69,30 +69,29 @@ export function DashboardHeader({ hidden }: DashboardHeaderProps) {
         const { data: res } = await api.get('/auth/me');
         const me = res.data;
         const profile = me?.profile;
-        const org = me?.user?.organizationId;
+        const orgName = me?.user?.organizationName ||
+          (typeof me?.user?.organizationId === 'object' && me?.user?.organizationId?.name) ||
+          user.organizationName ||
+          'Sahal Education Platform';
 
         setData({
           firstName: profile?.firstName || user.email?.split('@')[0] || '',
           lastName: profile?.lastName || '',
           email: me?.user?.email || user.email,
           role: me?.user?.role || user.role,
-          orgName:
-            (typeof org === 'object' && org?.name) ||
-            'Masjid Al-Rahma Institute',
-          orgInitial:
-            (typeof org === 'object' && org?.name
-              ? org.name.charAt(0).toUpperCase()
-              : 'M'),
+          orgName,
+          orgInitial: orgName.charAt(0).toUpperCase(),
         });
       } catch {
         // Fall back to auth-context data
+        const fallbackOrg = user.organizationName || 'Sahal Education Platform';
         setData({
           firstName: user.email?.split('@')[0] || '',
           lastName: '',
           email: user.email,
           role: user.role,
-          orgName: 'Masjid Al-Rahma Institute',
-          orgInitial: 'M',
+          orgName: fallbackOrg,
+          orgInitial: fallbackOrg.charAt(0).toUpperCase(),
         });
       } finally {
         setLoading(false);

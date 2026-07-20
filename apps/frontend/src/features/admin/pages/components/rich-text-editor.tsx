@@ -26,6 +26,7 @@ import TableCell from '@tiptap/extension-table-cell';
 import Placeholder from '@tiptap/extension-placeholder';
 import { TextStyle, FontFamily, FontSize, Color } from '@tiptap/extension-text-style';
 import { BlockDirection } from './tiptap-text-direction';
+import { sanitizeHtml } from '../../../../lib/sanitize-html';
 
 interface RichTextEditorProps {
   value: string;
@@ -49,6 +50,25 @@ const PROSE_CLASSES =
   '[&_[dir="rtl"]]:text-right [&_[dir="rtl"]]:leading-[1.9] ' +
   // Placeholder (empty first paragraph)
   '[&_p.is-editor-empty:first-child::before]:text-[var(--color-text-tertiary)] [&_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_p.is-editor-empty:first-child::before]:float-left [&_p.is-editor-empty:first-child::before]:h-0 [&_p.is-editor-empty:first-child::before]:pointer-events-none';
+
+// Student-facing preview classes — mirrors student-course-learn.tsx rendered output
+const PREVIEW_CLASSES =
+  'prose prose-sm dark:prose-invert max-w-none text-[var(--color-text-primary)] ' +
+  '[&_h1]:text-xl [&_h1]:font-bold [&_h1]:mb-3 ' +
+  '[&_h2]:text-lg [&_h2]:font-bold [&_h2]:mb-2 [&_h2]:mt-5 ' +
+  '[&_h3]:text-base [&_h3]:font-semibold [&_h3]:mb-2 [&_h3]:mt-4 ' +
+  '[&_p]:mb-3 [&_p]:leading-relaxed ' +
+  '[&_ul]:list-disc [&_ul]:pl-5 [&_ul]:mb-3 [&_ul]:space-y-1 ' +
+  '[&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:mb-3 [&_ol]:space-y-1 ' +
+  '[&_li]:text-sm ' +
+  '[&_a]:text-primary-600 [&_a]:underline [&_a]:hover:text-primary-700 ' +
+  '[&_img]:rounded-xl [&_img]:max-w-full [&_img]:my-4 ' +
+  '[&_blockquote]:border-l-4 [&_blockquote]:border-primary-400 [&_blockquote]:pl-4 [&_blockquote]:italic [&_blockquote]:text-[var(--color-text-secondary)] [&_blockquote]:my-4 ' +
+  '[&_code]:bg-[var(--color-surface-tertiary)] [&_code]:rounded-md [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-xs [&_code]:font-mono ' +
+  '[&_pre]:bg-[var(--color-surface-tertiary)] [&_pre]:rounded-xl [&_pre]:p-4 [&_pre]:overflow-x-auto [&_pre]:mb-4 ' +
+  '[&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-[var(--color-border-default)] [&_td]:p-2 ' +
+  '[&_th]:border [&_th]:border-[var(--color-border-default)] [&_th]:p-2 [&_th]:bg-[var(--color-surface-tertiary)] [&_th]:text-left ' +
+  '[&_[dir="rtl"]]:text-right [&_[dir="rtl"]]:leading-[1.9]';
 
 const FONT_FAMILIES: { label: string; value: string }[] = [
   { label: 'Default', value: '' },
@@ -340,7 +360,7 @@ function Toolbar({ editor }: { editor: Editor }) {
 }
 
 export function RichTextEditor({ value, onChange, placeholder }: RichTextEditorProps) {
-  const [tab, setTab] = useState<'visual' | 'code'>('visual');
+  const [tab, setTab] = useState<'visual' | 'code' | 'preview'>('visual');
   const codeRef = useRef<HTMLTextAreaElement>(null);
 
   // A lightweight tick to force the toolbar to re-render on plain cursor
@@ -386,6 +406,20 @@ export function RichTextEditor({ value, onChange, placeholder }: RichTextEditorP
     }
   }, [value, editor]);
 
+  // When switching to the Visual tab from any other tab, force the editor to
+  // adopt the current value. This ensures the WYSIWYG editor parses and
+  // renders the HTML correctly (e.g. headings, tables, lists) instead of
+  // showing a raw unformatted text block when the user edited the Code tab
+  // and switches back to Visual.
+  const prevTabRef = useRef(tab);
+  useEffect(() => {
+    if (!editor) return;
+    if (tab === 'visual' && prevTabRef.current !== 'visual') {
+      editor.commands.setContent(value || '', { emitUpdate: false });
+    }
+    prevTabRef.current = tab;
+  }, [tab, editor, value]);
+
   // Auto-resize the code textarea to fit its content, no scrollbar.
   useEffect(() => {
     const el = codeRef.current;
@@ -416,10 +450,32 @@ export function RichTextEditor({ value, onChange, placeholder }: RichTextEditorP
           >
             {'</>'} Code
           </button>
+          <button
+            type="button"
+            onClick={() => setTab('preview')}
+            className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
+              tab === 'preview' ? 'bg-primary-600 text-white shadow-sm' : 'text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)]'
+            }`}
+          >
+            👁️ Student View
+          </button>
         </div>
       </div>
 
-      {tab === 'visual' ? (
+      {tab === 'preview' ? (
+        <div className="max-h-[28rem] overflow-y-auto">
+          {value ? (
+            <div
+              className={`${PREVIEW_CLASSES} px-4 py-3 min-h-[6rem]`}
+              dangerouslySetInnerHTML={{ __html: sanitizeHtml(value) }}
+            />
+          ) : (
+            <div className="min-h-[6rem] flex items-center justify-center text-sm text-[var(--color-text-tertiary)] italic">
+              {placeholder || 'No content yet'}
+            </div>
+          )}
+        </div>
+      ) : tab === 'visual' ? (
         editor ? (
           <div>
             <Toolbar editor={editor} />

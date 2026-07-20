@@ -15,6 +15,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../../lib/axios';
 import type { CourseContent, Chapter, LessonItem, QuizItem, AssignmentItem, ContentBlock } from './course-builder.types';
 import { QuestionPreview } from '../../../components/shared/quiz-question-preview';
+import { sanitizeHtml } from '../../../lib/sanitize-html';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -788,7 +789,7 @@ function LessonView({ lesson }: { lesson: LessonItem }) {
             [&_blockquote]:border-l-4 [&_blockquote]:border-primary-400 [&_blockquote]:pl-4 [&_blockquote]:italic [&_blockquote]:text-[var(--color-text-secondary)] [&_blockquote]:my-4
             [&_code]:bg-[var(--color-surface-tertiary)] [&_code]:rounded-md [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-xs [&_code]:font-mono
             [&_pre]:bg-[var(--color-surface-tertiary)] [&_pre]:rounded-xl [&_pre]:p-4 [&_pre]:overflow-x-auto [&_pre]:mb-4"
-          dangerouslySetInnerHTML={{ __html: lesson.content }}
+          dangerouslySetInnerHTML={{ __html: sanitizeHtml(lesson.content) }}
         />
       )}
 
@@ -857,7 +858,7 @@ function InteractiveGateBlocksPreview({ lesson }: { lesson: LessonItem }) {
           )}
           <div
             className="prose prose-sm dark:prose-invert max-w-none text-[var(--color-text-primary)] [&_p]:mb-3 [&_p]:leading-relaxed"
-            dangerouslySetInnerHTML={{ __html: block.content }}
+            dangerouslySetInnerHTML={{ __html: sanitizeHtml(block.content) }}
           />
           {block.question && <ContentBlockQuestionPreview question={block.question} />}
         </div>
@@ -1010,7 +1011,7 @@ function AssignmentPreview({ assignment }: { assignment: AssignmentItem }) {
           <h4 className="text-sm font-bold text-[var(--color-text-primary)] mb-2">📝 Instructions</h4>
           <div
             className="prose prose-sm dark:prose-invert max-w-none text-[var(--color-text-primary)] bg-[var(--color-surface-secondary)] rounded-xl p-4 border border-[var(--color-border-default)]"
-            dangerouslySetInnerHTML={{ __html: assignment.instructions }}
+            dangerouslySetInnerHTML={{ __html: sanitizeHtml(assignment.instructions) }}
           />
         </div>
       )}

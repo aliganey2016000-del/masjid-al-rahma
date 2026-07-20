@@ -18,6 +18,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { marked } from 'marked';
 import { Mic, Square, Phone, X } from 'lucide-react';
 import api from '../../../lib/axios';
+import { sanitizeHtml } from '../../../lib/sanitize-html';
 
 // ---------------------------------------------------------------------------
 // Entity highlighting — wraps key Somali historical terms, locations, names
@@ -743,7 +744,7 @@ export function StudentAiTutor() {
                         prose-h3:text-sm prose-h3:font-semibold prose-h3:mb-2 prose-h3:mt-3
                         prose-code:bg-[var(--color-surface-tertiary)] prose-code:rounded prose-code:px-1 prose-code:py-0.5 prose-code:text-xs
                         [&_span.font-bold]:font-bold [&_span.text-blue-600]:text-blue-600 dark:[&_span.text-blue-400]:text-blue-400"
-                      dangerouslySetInnerHTML={{ __html: renderMarkdownWithHighlights(msg.content) }}
+                      dangerouslySetInnerHTML={{ __html: sanitizeHtml(renderMarkdownWithHighlights(msg.content)) }}
                     />
                   ) : (
                     <p className="whitespace-pre-wrap">{msg.content}</p>
