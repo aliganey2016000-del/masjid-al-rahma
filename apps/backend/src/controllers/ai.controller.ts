@@ -288,7 +288,10 @@ function stripHtml(html: string): string {
 
 // ---------------------------------------------------------------------------
 // POST /api/v1/ai/split-lesson — turn a Traditional lesson body into ordered
-// Content Blocks for Interactive Gate delivery mode.
+// Content Blocks for Interactive Gate delivery mode. Each block also gets
+// its Stop & Check question generated up front, so the admin doesn't have
+// to open every block individually and click "Generate Question" — that's
+// the whole point of asking the AI to do this in one pass.
 // ---------------------------------------------------------------------------
 export const splitLesson = async (req: Request, res: Response): Promise<Response> => {
   const { html } = req.body as { html?: string };
@@ -297,5 +300,22 @@ export const splitLesson = async (req: Request, res: Response): Promise<Response
   }
 
   const blocks = await splitLessonWithAi(html);
-  return ApiResponse.success(res, { blocks }, 'Lesson split into blocks successfully');
+
+  // Generate all block questions in parallel. A single block's question
+  // generation failing (e.g. a transient DeepSeek error) shouldn't discard
+  // the whole split — that block just ships without a question, and the
+  // admin can still generate/add one manually from the block editor.
+  const questionResults = await Promise.allSettled(
+    blocks.map((block) => generateStopCheckQuestion(stripHtml(block.content)))
+  );
+
+  const blocksWithQuestions = blocks.map((block, i) => {
+    const result = questionResults[i];
+    return {
+      ...block,
+      question: result.status === 'fulfilled' ? result.value : undefined,
+    };
+  });
+
+  return ApiResponse.success(res, { blocks: blocksWithQuestions }, 'Lesson split into blocks successfully');
 };

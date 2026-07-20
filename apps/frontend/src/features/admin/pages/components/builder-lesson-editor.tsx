@@ -121,13 +121,14 @@ export function LessonEditor({ lesson, onSave, onCancel, formId, hideActions }: 
     setAiSplitting(true);
     try {
       const { data } = await api.post('/ai/split-lesson', { html: form.content });
-      const aiBlocks: { title: string; content: string }[] = data.data.blocks || [];
+      const aiBlocks: { title: string; content: string; question?: ContentBlock['question'] }[] = data.data.blocks || [];
       const blocks: ContentBlock[] = aiBlocks.map((b, i) => ({
         _id: generateTempId(),
         order: i,
         title: b.title || undefined,
         content: b.content,
         minReadSeconds: Number(form.defaultMinReadSeconds) || 30,
+        question: b.question || undefined,
       }));
       if (blocks.length === 0) {
         setSplitError('AI could not find any sections to split. Try the divider method instead.');
@@ -297,13 +298,13 @@ export function LessonEditor({ lesson, onSave, onCancel, formId, hideActions }: 
           <div className="mt-3 rounded-xl border border-dashed border-[var(--color-border-default)] bg-[var(--color-surface-primary)] p-3 space-y-2">
             <p className="text-xs font-semibold text-[var(--color-text-secondary)]">Convert to Interactive Gate</p>
             <p className="text-[11px] text-[var(--color-text-tertiary)]">
-              Turn this content into gated Content Blocks — split it yourself with a divider, or let AI do it.
+              Turn this content into gated Content Blocks — split it yourself with a divider, or let AI split it and write a Stop &amp; Check question for each block.
             </p>
 
             {aiSplitting ? (
               <div className="flex items-center gap-2 rounded-lg bg-violet-50 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-800 px-3 py-2.5">
                 <Loader2 className="h-4 w-4 animate-spin text-violet-600 dark:text-violet-400 shrink-0" />
-                <p className="text-xs text-violet-700 dark:text-violet-300">AI is analyzing and organizing your lesson into interactive blocks...</p>
+                <p className="text-xs text-violet-700 dark:text-violet-300">AI is splitting your lesson into blocks and writing a check question for each one...</p>
               </div>
             ) : (
               <div className="flex flex-wrap gap-2">
