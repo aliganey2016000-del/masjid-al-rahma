@@ -33,6 +33,10 @@ export interface ContentBlockQuestion {
   correctAnswer?: boolean; // true_false — omitted entirely in the student-facing read
   explanation?: string; // shown after an incorrect attempt — omitted in the student-facing pre-submit read
   aiGenerated: boolean;
+  // Present only in the student-facing read (course-content.controller.ts's
+  // stripGateAnswers) in place of the plaintext answer fields above — lets
+  // an offline client grade an attempt locally via lib/offline-gate.ts.
+  answerHash?: string;
 }
 
 export interface ContentBlock {

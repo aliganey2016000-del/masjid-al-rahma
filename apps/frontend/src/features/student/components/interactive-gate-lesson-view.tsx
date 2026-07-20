@@ -21,6 +21,8 @@ import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import api from '../../../lib/axios';
 import type { LessonItem } from '../../admin/pages/course-builder.types';
+import { checkGateAnswerOffline } from '../../../lib/offline-gate';
+import { getGateProgress, patchGateProgress, queueAction, queueVideoProgress } from '../../../lib/offline-store';
 
 type Phase = 'loading' | 'reading' | 'ready' | 'question_open' | 'question_retry' | 'cleared';
 
@@ -44,6 +46,65 @@ function extractVideoEmbed(url: string): { type: 'youtube' | 'vimeo' | 'direct' 
   return { type: null, id: '' };
 }
 
+const YOUTUBE_IFRAME_API_SRC = 'https://www.youtube.com/iframe_api';
+const VIMEO_PLAYER_API_SRC = 'https://player.vimeo.com/api/player.js';
+
+function loadYouTubeIframeAPI(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const win = window as any;
+    if (win.YT?.Player) {
+      resolve();
+      return;
+    }
+
+    if (document.getElementById('youtube-iframe-api')) {
+      const interval = window.setInterval(() => {
+        if (win.YT?.Player) {
+          window.clearInterval(interval);
+          resolve();
+        }
+      }, 50);
+      return;
+    }
+
+    const tag = document.createElement('script');
+    tag.id = 'youtube-iframe-api';
+    tag.src = YOUTUBE_IFRAME_API_SRC;
+    tag.async = true;
+    tag.onerror = () => reject(new Error('Failed to load YouTube IFrame API'));
+    win.onYouTubeIframeAPIReady = () => resolve();
+    document.body.appendChild(tag);
+  });
+}
+
+function loadVimeoPlayerAPI(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const win = window as any;
+    if (win.Vimeo?.Player) {
+      resolve();
+      return;
+    }
+
+    if (document.getElementById('vimeo-player-api')) {
+      const interval = window.setInterval(() => {
+        if (win.Vimeo?.Player) {
+          window.clearInterval(interval);
+          resolve();
+        }
+      }, 50);
+      return;
+    }
+
+    const tag = document.createElement('script');
+    tag.id = 'vimeo-player-api';
+    tag.src = VIMEO_PLAYER_API_SRC;
+    tag.async = true;
+    tag.onload = () => resolve();
+    tag.onerror = () => reject(new Error('Failed to load Vimeo Player API'));
+    document.body.appendChild(tag);
+  });
+}
+
 export function InteractiveGateLessonView({ lesson, courseId, onGateCleared }: InteractiveGateLessonViewProps) {
   const blocks = lesson.contentBlocks || [];
   const [currentBlockIndex, setCurrentBlockIndex] = useState(0);
@@ -58,28 +119,69 @@ export function InteractiveGateLessonView({ lesson, courseId, onGateCleared }: I
   const [maxTimeWatched, setMaxTimeWatched] = useState(0);
   const [clearedCheckpoints, setClearedCheckpoints] = useState<Set<number>>(new Set());
 
-  // Resume from server — never trust client state as the source of truth
-  // for how far a student has actually progressed.
+  // Resume from server — never trust client state as the source of truth for
+  // how far a student has actually progressed. Falls back to the local
+  // IndexedDB mirror (kept in sync by every offline answer/progress update)
+  // when there's no connection or the request fails, so the gate keeps
+  // working — and keeps remembering where the student got to — offline.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      try {
-        const { data } = await api.get(`/courses/${courseId}/lessons/${lesson._id}/gate`);
-        if (cancelled) return;
-        const progress = data.data;
-        setMaxTimeWatched(progress.maxTimeWatched || 0);
-        setClearedCheckpoints(new Set<number>(progress.clearedCheckpoints || []));
-        if (blocks.length === 0) {
-          setPhase('cleared'); // no text blocks to gate — video (if any) still gates itself
-        } else if (progress.gateCompleted) {
-          setPhase('cleared');
-          onGateCleared();
-        } else {
-          setCurrentBlockIndex(Math.min(progress.unlockedBlockIndex || 0, blocks.length - 1));
-          setPhase('reading');
+      let progress: {
+        maxTimeWatched?: number;
+        clearedCheckpoints?: number[];
+        unlockedBlockIndex?: number;
+        gateCompleted?: boolean;
+      } | null = null;
+
+      if (navigator.onLine) {
+        try {
+          const { data } = await api.get(`/courses/${courseId}/lessons/${lesson._id}/gate`);
+          progress = data.data;
+          // Refresh the local mirror so a later offline session (or a
+          // reload right after the connection drops) resumes from here.
+          if (progress) {
+            void patchGateProgress(lesson._id, courseId, {
+              unlockedBlockIndex: progress.unlockedBlockIndex || 0,
+              gateCompleted: !!progress.gateCompleted,
+              maxTimeWatched: progress.maxTimeWatched || 0,
+              clearedCheckpoints: progress.clearedCheckpoints || [],
+            });
+          }
+        } catch {
+          // fall through to the local mirror below
         }
-      } catch {
-        if (!cancelled) setPhase(blocks.length === 0 ? 'cleared' : 'reading');
+      }
+
+      if (!progress) {
+        const local = await getGateProgress(lesson._id);
+        if (local) {
+          progress = {
+            maxTimeWatched: local.maxTimeWatched,
+            clearedCheckpoints: local.clearedCheckpoints,
+            unlockedBlockIndex: local.unlockedBlockIndex,
+            gateCompleted: local.gateCompleted,
+          };
+        }
+      }
+
+      if (cancelled) return;
+
+      if (!progress) {
+        setPhase(blocks.length === 0 ? 'cleared' : 'reading');
+        return;
+      }
+
+      setMaxTimeWatched(progress.maxTimeWatched || 0);
+      setClearedCheckpoints(new Set<number>(progress.clearedCheckpoints || []));
+      if (blocks.length === 0) {
+        setPhase('cleared'); // no text blocks to gate — video (if any) still gates itself
+      } else if (progress.gateCompleted) {
+        setPhase('cleared');
+        onGateCleared();
+      } else {
+        setCurrentBlockIndex(Math.min(progress.unlockedBlockIndex || 0, blocks.length - 1));
+        setPhase('reading');
       }
     })();
     return () => { cancelled = true; };
@@ -170,14 +272,57 @@ export function InteractiveGateLessonView({ lesson, courseId, onGateCleared }: I
   const submitAnswer = async (advanceOnly = false) => {
     setSubmitting(true);
     setError('');
+    const answerToSubmit = advanceOnly ? true : selectedAnswer;
+    const url = `/courses/${courseId}/lessons/${lesson._id}/gate/blocks/${currentBlockIndex}/answer`;
+    const isLastBlock = currentBlockIndex === blocks.length - 1;
+
+    // Offline: grade locally against the answer's hash (the plaintext
+    // answer is never shipped to the client — see stripGateAnswers on the
+    // backend), advance the gate locally, and queue the real grading call
+    // for whenever the connection returns. A wrong offline attempt is never
+    // sent anywhere — there's nothing useful the server could do with it
+    // while unreachable, and no hint/explanation is available offline
+    // anyway (also stripped, for the same spoiler-prevention reason).
+    if (!navigator.onLine) {
+      try {
+        const correct = block.question
+          ? await checkGateAnswerOffline(lesson._id, 'block', currentBlockIndex, answerToSubmit, block.question.answerHash)
+          : true;
+
+        if (correct) {
+          setSelectedAnswer(null);
+          setRetryExplanation('');
+          await queueAction({ type: 'gate-block-answer', url, body: { answer: answerToSubmit } });
+          await patchGateProgress(lesson._id, courseId, {
+            unlockedBlockIndex: currentBlockIndex + 1,
+            gateCompleted: isLastBlock,
+          });
+          if (isLastBlock) {
+            setPhase('cleared');
+            onGateCleared();
+          } else {
+            setCurrentBlockIndex((i) => i + 1);
+            setPhase('reading');
+          }
+        } else {
+          setRetryExplanation('');
+          setPhase('question_retry');
+        }
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
     try {
-      const { data } = await api.post(
-        `/courses/${courseId}/lessons/${lesson._id}/gate/blocks/${currentBlockIndex}/answer`,
-        { answer: advanceOnly ? true : selectedAnswer }
-      );
+      const { data } = await api.post(url, { answer: answerToSubmit });
       if (data.data.correct) {
         setSelectedAnswer(null);
         setRetryExplanation('');
+        await patchGateProgress(lesson._id, courseId, {
+          unlockedBlockIndex: data.data.unlockedBlockIndex,
+          gateCompleted: data.data.gateCompleted,
+        });
         if (data.data.gateCompleted) {
           setPhase('cleared');
           onGateCleared();
@@ -319,8 +464,8 @@ export function InteractiveGateLessonView({ lesson, courseId, onGateCleared }: I
 }
 
 // ===========================================================================
-// Video Player — checkpoint gating for self-hosted (direct) video; plain
-// embed for YouTube/Vimeo (their iframes can't be driven by <video> events).
+// Video Player — checkpoint gating for self-hosted (direct) video; and
+// YouTube/Vimeo embeds using their player SDKs to enforce checkpoint pauses.
 // ===========================================================================
 
 const SEEK_TOLERANCE_SECONDS = 0.75; // avoid fighting the browser's own micro-seeks
@@ -338,9 +483,13 @@ function LessonVideoPlayer({
   setClearedCheckpoints: (s: Set<number>) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const playerContainerRef = useRef<HTMLDivElement>(null);
+  const playerRef = useRef<any>(null);
+  const pollingRef = useRef<number | null>(null);
   const maxTimeRef = useRef(maxTimeWatched);
   const lastSyncedRef = useRef(0);
   const [embedFailed, setEmbedFailed] = useState(false);
+  const [embedReady, setEmbedReady] = useState(false);
 
   const [activeCheckpointIndex, setActiveCheckpointIndex] = useState<number | null>(null);
   const [checkpointAnswer, setCheckpointAnswer] = useState<number | boolean | null>(null);
@@ -353,17 +502,60 @@ function LessonVideoPlayer({
 
   useEffect(() => { maxTimeRef.current = maxTimeWatched; }, [maxTimeWatched]);
 
-  // Seek the player to where the student left off, once its metadata is ready.
-  const handleLoadedMetadata = () => {
-    if (videoRef.current && maxTimeRef.current > 0) {
-      videoRef.current.currentTime = maxTimeRef.current;
-    }
-  };
-
   const syncProgress = (t: number) => {
     if (t - lastSyncedRef.current < PROGRESS_SYNC_INTERVAL_SECONDS) return;
     lastSyncedRef.current = t;
-    api.post(`/courses/${courseId}/lessons/${lesson._id}/gate/video-progress`, { currentTime: t }).catch(() => {});
+    const url = `/courses/${courseId}/lessons/${lesson._id}/gate/video-progress`;
+    // This is pacing state, not a graded gate (see the backend comment on
+    // updateVideoProgress) — while offline it's enough to keep the local
+    // mirror fresh (so a reload resumes from here) and queue a single
+    // best-effort sync for reconnect; no local grading needed.
+    if (!navigator.onLine) {
+      void patchGateProgress(lesson._id, courseId, { maxTimeWatched: t });
+      void queueVideoProgress(lesson._id, url, t);
+      return;
+    }
+    api.post(url, { currentTime: t })
+      .then(() => { void patchGateProgress(lesson._id, courseId, { maxTimeWatched: t }); })
+      .catch(() => {});
+  };
+
+  const getEmbedCurrentTime = async (): Promise<number> => {
+    if (!playerRef.current) return 0;
+    if (video.type === 'youtube') {
+      return playerRef.current.getCurrentTime();
+    }
+    if (video.type === 'vimeo') {
+      return playerRef.current.getCurrentTime();
+    }
+    return 0;
+  };
+
+  const seekEmbed = async (seconds: number) => {
+    if (!playerRef.current) return;
+    if (video.type === 'youtube') {
+      playerRef.current.seekTo(seconds, true);
+    } else if (video.type === 'vimeo') {
+      await playerRef.current.setCurrentTime(seconds);
+    }
+  };
+
+  const playEmbed = () => {
+    if (!playerRef.current) return;
+    if (video.type === 'youtube') {
+      playerRef.current.playVideo();
+    } else if (video.type === 'vimeo') {
+      playerRef.current.play();
+    }
+  };
+
+  const pauseEmbed = () => {
+    if (!playerRef.current) return;
+    if (video.type === 'youtube') {
+      playerRef.current.pauseVideo();
+    } else if (video.type === 'vimeo') {
+      playerRef.current.pause();
+    }
   };
 
   const handleTimeUpdate = () => {
@@ -392,8 +584,6 @@ function LessonVideoPlayer({
     }
   };
 
-  // "Block Forward Seeking" — reset any scrub that lands past the furthest
-  // continuously-watched point.
   const handleSeeked = () => {
     const el = videoRef.current;
     if (!el || !lesson.blockForwardSeeking) return;
@@ -402,11 +592,192 @@ function LessonVideoPlayer({
     }
   };
 
-  // Guard against resuming playback (e.g. via keyboard shortcuts) while a
-  // checkpoint question is unresolved.
   const handlePlay = () => {
     if (activeCheckpointIndex !== null) {
       videoRef.current?.pause();
+    }
+  };
+
+  const updateEmbedProgress = async () => {
+    if (!playerRef.current || activeCheckpointIndex !== null) return;
+
+    const t = await getEmbedCurrentTime();
+    if (t > maxTimeRef.current) {
+      maxTimeRef.current = t;
+      setMaxTimeWatched(t);
+      syncProgress(t);
+    }
+
+    if (lesson.blockForwardSeeking && t > maxTimeRef.current + SEEK_TOLERANCE_SECONDS) {
+      await seekEmbed(maxTimeRef.current);
+    }
+
+    if (videoDuration <= 0) return;
+    for (let i = 0; i < checkpoints.length; i++) {
+      if (clearedCheckpoints.has(i)) continue;
+      const targetSeconds = (checkpoints[i].percentage / 100) * videoDuration;
+      if (t >= targetSeconds) {
+        pauseEmbed();
+        setActiveCheckpointIndex(i);
+        setCheckpointAnswer(null);
+        setCheckpointWarning('');
+        setCheckpointError('');
+        break;
+      }
+    }
+  };
+
+  const startEmbedPolling = () => {
+    if (pollingRef.current !== null) return;
+    pollingRef.current = window.setInterval(() => {
+      void updateEmbedProgress();
+    }, 500);
+  };
+
+  const stopEmbedPolling = () => {
+    if (pollingRef.current !== null) {
+      window.clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+  };
+
+  const initYouTubePlayer = async () => {
+    try {
+      await loadYouTubeIframeAPI();
+      if (!playerContainerRef.current) return;
+      playerRef.current?.destroy?.();
+      playerRef.current = new (window as any).YT.Player(playerContainerRef.current, {
+        height: '100%',
+        width: '100%',
+        videoId: video.id,
+        playerVars: {
+          autoplay: 0,
+          controls: 1,
+          rel: 0,
+          modestbranding: 1,
+          disablekb: 1,
+          iv_load_policy: 3,
+        },
+        events: {
+          onReady: async () => {
+            setEmbedReady(true);
+            if (maxTimeRef.current > 0) {
+              playerRef.current.seekTo(maxTimeRef.current, true);
+            }
+            startEmbedPolling();
+          },
+          onStateChange: (event: any) => {
+            if (event.data === 1 && activeCheckpointIndex !== null) {
+              playerRef.current.pauseVideo();
+            }
+            if (event.data === 1) {
+              startEmbedPolling();
+            }
+            if (event.data === 2 || event.data === 0) {
+              stopEmbedPolling();
+            }
+          },
+          onError: () => {
+            setEmbedFailed(true);
+          },
+        },
+      });
+    } catch {
+      setEmbedFailed(true);
+    }
+  };
+
+  const initVimeoPlayer = async () => {
+    try {
+      await loadVimeoPlayerAPI();
+      if (!playerContainerRef.current) return;
+      playerRef.current?.destroy?.();
+      playerRef.current = new (window as any).Vimeo.Player(playerContainerRef.current, {
+        id: Number(video.id),
+        width: '100%',
+        controls: true,
+        autopause: true,
+      });
+      playerRef.current.on('loaded', async () => {
+        setEmbedReady(true);
+        if (maxTimeRef.current > 0) {
+          await playerRef.current.setCurrentTime(maxTimeRef.current);
+        }
+        startEmbedPolling();
+      });
+      playerRef.current.on('play', () => {
+        if (activeCheckpointIndex !== null) {
+          playerRef.current.pause();
+        } else {
+          startEmbedPolling();
+        }
+      });
+      playerRef.current.on('pause', stopEmbedPolling);
+      playerRef.current.on('seeked', async () => {
+        if (!lesson.blockForwardSeeking) return;
+        const t = await getEmbedCurrentTime();
+        if (t > maxTimeRef.current + SEEK_TOLERANCE_SECONDS) {
+          await seekEmbed(maxTimeRef.current);
+        }
+      });
+      playerRef.current.on('timeupdate', async ({ seconds }: { seconds: number }) => {
+        if (!playerRef.current || activeCheckpointIndex !== null) return;
+        if (seconds > maxTimeRef.current) {
+          maxTimeRef.current = seconds;
+          setMaxTimeWatched(seconds);
+          syncProgress(seconds);
+        }
+
+        if (lesson.blockForwardSeeking && seconds > maxTimeRef.current + SEEK_TOLERANCE_SECONDS) {
+          await seekEmbed(maxTimeRef.current);
+        }
+
+        if (videoDuration <= 0) return;
+        for (let i = 0; i < checkpoints.length; i++) {
+          if (clearedCheckpoints.has(i)) continue;
+          const targetSeconds = (checkpoints[i].percentage / 100) * videoDuration;
+          if (seconds >= targetSeconds) {
+            playerRef.current.pause();
+            setActiveCheckpointIndex(i);
+            setCheckpointAnswer(null);
+            setCheckpointWarning('');
+            setCheckpointError('');
+            break;
+          }
+        }
+      });
+    } catch {
+      setEmbedFailed(true);
+    }
+  };
+
+  useEffect(() => {
+    if (video.type === 'youtube') {
+      void initYouTubePlayer();
+    } else if (video.type === 'vimeo') {
+      void initVimeoPlayer();
+    }
+
+    return () => {
+      stopEmbedPolling();
+      playerRef.current?.destroy?.();
+      playerRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [video.type, video.id]);
+
+  useEffect(() => {
+    if (activeCheckpointIndex === null) return;
+    if (video.type === 'direct') {
+      videoRef.current?.pause();
+    } else {
+      pauseEmbed();
+    }
+  }, [activeCheckpointIndex, video.type]);
+
+  const handleLoadedMetadata = () => {
+    if (videoRef.current && maxTimeRef.current > 0) {
+      videoRef.current.currentTime = maxTimeRef.current;
     }
   };
 
@@ -414,17 +785,49 @@ function LessonVideoPlayer({
     if (activeCheckpointIndex === null || checkpointAnswer === null) return;
     setCheckpointSubmitting(true);
     setCheckpointError('');
-    try {
-      const { data } = await api.post(
-        `/courses/${courseId}/lessons/${lesson._id}/gate/checkpoints/${activeCheckpointIndex}/answer`,
-        { answer: checkpointAnswer }
-      );
-      if (data.data.correct) {
-        setClearedCheckpoints(new Set(data.data.clearedCheckpoints || []));
-        setActiveCheckpointIndex(null);
-        setCheckpointAnswer(null);
-        setCheckpointWarning('');
+    const url = `/courses/${courseId}/lessons/${lesson._id}/gate/checkpoints/${activeCheckpointIndex}/answer`;
+    const checkpoint = checkpoints[activeCheckpointIndex];
+
+    const unlock = () => {
+      setActiveCheckpointIndex(null);
+      setCheckpointAnswer(null);
+      setCheckpointWarning('');
+      if (video.type === 'direct') {
         videoRef.current?.play();
+      } else {
+        playEmbed();
+      }
+    };
+
+    if (!navigator.onLine) {
+      try {
+        const correct = await checkGateAnswerOffline(
+          lesson._id, 'checkpoint', activeCheckpointIndex, checkpointAnswer, checkpoint?.question?.answerHash
+        );
+        if (correct) {
+          const nextCleared = new Set(clearedCheckpoints).add(activeCheckpointIndex);
+          setClearedCheckpoints(nextCleared);
+          await queueAction({ type: 'gate-checkpoint-answer', url, body: { answer: checkpointAnswer } });
+          await patchGateProgress(lesson._id, courseId, { clearedCheckpoints: [...nextCleared] });
+          unlock();
+        } else {
+          setCheckpointWarning(
+            'Incorrect answer. Please rewind, re-watch the section, and try answering again to unlock the rest of the video.'
+          );
+        }
+      } finally {
+        setCheckpointSubmitting(false);
+      }
+      return;
+    }
+
+    try {
+      const { data } = await api.post(url, { answer: checkpointAnswer });
+      if (data.data.correct) {
+        const nextCleared = new Set<number>(data.data.clearedCheckpoints || []);
+        setClearedCheckpoints(nextCleared);
+        await patchGateProgress(lesson._id, courseId, { clearedCheckpoints: [...nextCleared] });
+        unlock();
       } else {
         setCheckpointWarning(
           'Incorrect answer. Please rewind, re-watch the section, and try answering again to unlock the rest of the video.'
@@ -442,27 +845,11 @@ function LessonVideoPlayer({
   return (
     <div className="relative w-full aspect-video rounded-xl overflow-hidden bg-black">
       {video.type === 'youtube' && !embedFailed && (
-        <iframe
-          src={`https://www.youtube-nocookie.com/embed/${video.id}?rel=0&modestbranding=1&controls=1&showinfo=0&iv_load_policy=3`}
-          title="Course Video"
-          className="absolute inset-0 w-full h-full"
-          allow="autoplay; fullscreen"
-          allowFullScreen
-          sandbox="allow-scripts allow-same-origin allow-presentation"
-          onError={() => setEmbedFailed(true)}
-        />
+        <div ref={playerContainerRef} className="absolute inset-0 w-full h-full" />
       )}
 
       {video.type === 'vimeo' && !embedFailed && (
-        <iframe
-          src={`https://player.vimeo.com/video/${video.id}?title=0&byline=0&portrait=0&dnt=1`}
-          title="Course Video"
-          className="absolute inset-0 w-full h-full"
-          allow="autoplay; fullscreen; picture-in-picture"
-          allowFullScreen
-          sandbox="allow-scripts allow-same-origin allow-presentation"
-          onError={() => setEmbedFailed(true)}
-        />
+        <div ref={playerContainerRef} className="absolute inset-0 w-full h-full" />
       )}
 
       {video.type === 'direct' && (
@@ -474,13 +861,27 @@ function LessonVideoPlayer({
           className="absolute inset-0 w-full h-full"
           preload="metadata"
           onLoadedMetadata={handleLoadedMetadata}
-          onTimeUpdate={handleTimeUpdate}
-          onSeeked={handleSeeked}
+          onTimeUpdate={async () => {
+            if (activeCheckpointIndex !== null) return;
+            handleTimeUpdate();
+          }}
+          onSeeked={() => {
+            if (activeCheckpointIndex !== null) return;
+            handleSeeked();
+          }}
           onPlay={handlePlay}
         >
           <source src={video.id} />
           <p className="text-white p-4 text-sm text-center">Your browser does not support the video tag.</p>
         </video>
+      )}
+
+      {embedFailed && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black text-white p-4 text-center">
+          <p>
+            Video playback is unavailable. Please refresh the page or contact support if this persists.
+          </p>
+        </div>
       )}
 
       {/* ── Checkpoint Overlay ── */}

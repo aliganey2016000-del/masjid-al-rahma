@@ -11,20 +11,29 @@
 import { openDB, type IDBPDatabase } from 'idb';
 
 const DB_NAME = 'sahal-offline';
-const DB_VERSION = 1;
+const DB_VERSION = 3;
 
 const STORE_COURSES = 'downloadedCourses';
 const STORE_QUEUE = 'pendingActions';
+const STORE_GATE = 'gateProgress';
+const STORE_OFFLINE_DATA = 'offlineData';
 
 export interface DownloadedCourse {
   courseId: string;
   downloadedAt: number;
-  course: any; // EnrolledCourse shape, as returned by /students/my/courses
-  content: any; // CourseContent shape, as returned by /courses/:id/content
-  videoUrls: string[]; // direct-hosted video URLs warmed into the SW cache
+  course: any;
+  content: any;
+  videoUrls: string[];
 }
 
-export type PendingActionType = 'mark-complete' | 'gamification-lesson' | 'gamification-quiz' | 'gamification-streak';
+export type PendingActionType =
+  | 'mark-complete'
+  | 'gamification-lesson'
+  | 'gamification-quiz'
+  | 'gamification-streak'
+  | 'gate-block-answer'
+  | 'gate-checkpoint-answer'
+  | 'gate-video-progress';
 
 export interface PendingAction {
   id?: number;
@@ -32,6 +41,17 @@ export interface PendingAction {
   url: string;
   body: Record<string, unknown>;
   createdAt: number;
+  dedupeKey?: string;
+}
+
+export interface GateProgress {
+  lessonId: string;
+  courseId: string;
+  unlockedBlockIndex: number;
+  gateCompleted: boolean;
+  maxTimeWatched: number;
+  clearedCheckpoints: number[];
+  updatedAt: number;
 }
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
@@ -39,17 +59,38 @@ let dbPromise: Promise<IDBPDatabase> | null = null;
 function getDb(): Promise<IDBPDatabase> {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(db) {
+      upgrade(db, oldVersion) {
         if (!db.objectStoreNames.contains(STORE_COURSES)) {
           db.createObjectStore(STORE_COURSES, { keyPath: 'courseId' });
         }
         if (!db.objectStoreNames.contains(STORE_QUEUE)) {
           db.createObjectStore(STORE_QUEUE, { keyPath: 'id', autoIncrement: true });
         }
+        if (oldVersion < 2 && !db.objectStoreNames.contains(STORE_GATE)) {
+          db.createObjectStore(STORE_GATE, { keyPath: 'lessonId' });
+        }
+        if (oldVersion < 3 && !db.objectStoreNames.contains(STORE_OFFLINE_DATA)) {
+          db.createObjectStore(STORE_OFFLINE_DATA, { keyPath: 'key' });
+        }
       },
     });
   }
   return dbPromise;
+}
+
+// ---------------------------------------------------------------------------
+// Generic offline data cache (key-value store for teacher portal offline use)
+// ---------------------------------------------------------------------------
+
+export async function saveOfflineData(key: string, value: any): Promise<void> {
+  const db = await getDb();
+  await db.put(STORE_OFFLINE_DATA, { key, value, updatedAt: Date.now() });
+}
+
+export async function getOfflineData<T = any>(key: string): Promise<T | undefined> {
+  const db = await getDb();
+  const record = await db.get(STORE_OFFLINE_DATA, key);
+  return record?.value;
 }
 
 // ---------------------------------------------------------------------------
@@ -82,7 +123,7 @@ export async function listDownloadedCourseIds(): Promise<string[]> {
 }
 
 // ---------------------------------------------------------------------------
-// Pending action queue — actions taken while offline, replayed on reconnect
+// Pending action queue
 // ---------------------------------------------------------------------------
 
 export async function queueAction(action: Omit<PendingAction, 'id' | 'createdAt'>): Promise<void> {
@@ -98,4 +139,54 @@ export async function getQueuedActions(): Promise<PendingAction[]> {
 export async function removeQueuedAction(id: number): Promise<void> {
   const db = await getDb();
   await db.delete(STORE_QUEUE, id);
+}
+
+export async function queueVideoProgress(lessonId: string, url: string, currentTime: number): Promise<void> {
+  const db = await getDb();
+  const tx = db.transaction(STORE_QUEUE, 'readwrite');
+  const all = await tx.store.getAll();
+  const stale = all.find((a) => a.type === 'gate-video-progress' && a.dedupeKey === lessonId);
+  if (stale) await tx.store.delete(stale.id);
+  await tx.store.add({
+    type: 'gate-video-progress',
+    url,
+    body: { currentTime },
+    dedupeKey: lessonId,
+    createdAt: Date.now(),
+  });
+  await tx.done;
+}
+
+// ---------------------------------------------------------------------------
+// Interactive Gate progress
+// ---------------------------------------------------------------------------
+
+export async function getGateProgress(lessonId: string): Promise<GateProgress | undefined> {
+  const db = await getDb();
+  return db.get(STORE_GATE, lessonId);
+}
+
+export async function saveGateProgress(progress: GateProgress): Promise<void> {
+  const db = await getDb();
+  await db.put(STORE_GATE, progress);
+}
+
+export async function patchGateProgress(
+  lessonId: string,
+  courseId: string,
+  partial: Partial<Omit<GateProgress, 'lessonId' | 'courseId' | 'updatedAt'>>
+): Promise<GateProgress> {
+  const existing = await getGateProgress(lessonId);
+  const merged: GateProgress = {
+    lessonId,
+    courseId,
+    unlockedBlockIndex: existing?.unlockedBlockIndex ?? 0,
+    gateCompleted: existing?.gateCompleted ?? false,
+    maxTimeWatched: existing?.maxTimeWatched ?? 0,
+    clearedCheckpoints: existing?.clearedCheckpoints ?? [],
+    ...partial,
+    updatedAt: Date.now(),
+  };
+  await saveGateProgress(merged);
+  return merged;
 }

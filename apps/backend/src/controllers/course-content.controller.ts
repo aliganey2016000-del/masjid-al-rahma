@@ -5,6 +5,7 @@
  * One content document per course (upsert pattern).
  */
 
+import crypto from 'crypto';
 import { Request, Response } from 'express';
 import CourseContent from '../models/course-content.model';
 import Course from '../models/course.model';
@@ -12,27 +13,61 @@ import { NotFoundError } from '../utils/api-error';
 import ApiResponse from '../utils/api-response';
 import { assertOwnsOrg } from '../utils/tenant-scope';
 
+/**
+ * SHA-256 of a gate answer, salted per-question by lesson id + scope + index.
+ * Lets the OFFLINE client grade a Stop & Check / checkpoint attempt locally
+ * (hash the attempt, compare) without ever shipping the plaintext answer.
+ * Must stay byte-identical to `hashGateAnswer` in
+ * frontend/src/lib/offline-gate.ts.
+ */
+export function hashGateAnswer(
+  lessonId: string,
+  scope: 'block' | 'checkpoint',
+  index: number,
+  answer: unknown
+): string {
+  return crypto
+    .createHash('sha256')
+    .update(`${lessonId}:${scope}:${index}:${String(answer)}`)
+    .digest('hex');
+}
+
 // Students must never receive the correct answer for a Stop & Check question
-// before they submit one — strip it from any content read by a student.
+// before they submit one — strip it from any content read by a student. A
+// salted hash of the answer is left in its place so downloaded-for-offline
+// content can still be graded locally without a connection.
 function stripGateAnswers(content: any, isStudent: boolean) {
   if (!isStudent || !content?.chapters) return content;
   for (const chapter of content.chapters) {
     for (const item of chapter.items || []) {
       if (item.type !== 'lesson') continue;
-      for (const block of item.contentBlocks || []) {
+      const lessonId = item._id?.toString() || '';
+      (item.contentBlocks || []).forEach((block: any, blockIndex: number) => {
         if (block.question) {
+          const correctValue = block.question.type === 'mcq'
+            ? block.question.correctOptionIndex
+            : block.question.correctAnswer;
+          if (correctValue !== undefined) {
+            block.question.answerHash = hashGateAnswer(lessonId, 'block', blockIndex, correctValue);
+          }
           delete block.question.correctOptionIndex;
           delete block.question.correctAnswer;
           delete block.question.explanation; // often paraphrases the correct answer — same spoiler risk
         }
-      }
-      for (const checkpoint of item.videoCheckpoints || []) {
+      });
+      (item.videoCheckpoints || []).forEach((checkpoint: any, cpIndex: number) => {
         if (checkpoint.question) {
+          const correctValue = checkpoint.question.type === 'mcq'
+            ? checkpoint.question.correctOptionIndex
+            : checkpoint.question.correctAnswer;
+          if (correctValue !== undefined) {
+            checkpoint.question.answerHash = hashGateAnswer(lessonId, 'checkpoint', cpIndex, correctValue);
+          }
           delete checkpoint.question.correctOptionIndex;
           delete checkpoint.question.correctAnswer;
           delete checkpoint.question.explanation;
         }
-      }
+      });
     }
   }
   return content;
