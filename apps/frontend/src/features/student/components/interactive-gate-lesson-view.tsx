@@ -549,17 +549,36 @@ function LessonVideoPlayer({
   const pollingRef = useRef<number | null>(null);
   const maxTimeRef = useRef(maxTimeWatched);
   const lastSyncedRef = useRef(0);
+  // The YouTube/Vimeo polling loop is wired up once inside a mount-only
+  // effect (see below) — the setInterval callback it registers keeps
+  // calling the exact closure that existed at that moment forever, so any
+  // state that changes AFTER mount (sdkDuration arriving async from the
+  // player SDK, clearedCheckpoints updating after a correct answer) must
+  // be read through a ref, not the closed-over value, or the poll loop
+  // never sees the update.
+  const clearedCheckpointsRef = useRef(clearedCheckpoints);
+  useEffect(() => { clearedCheckpointsRef.current = clearedCheckpoints; }, [clearedCheckpoints]);
   const [embedFailed, setEmbedFailed] = useState(false);
   const [embedReady, setEmbedReady] = useState(false);
 
   const [activeCheckpointIndex, setActiveCheckpointIndex] = useState<number | null>(null);
+  const activeCheckpointIndexRef = useRef<number | null>(null);
+  useEffect(() => { activeCheckpointIndexRef.current = activeCheckpointIndex; }, [activeCheckpointIndex]);
   const [checkpointAnswer, setCheckpointAnswer] = useState<number | boolean | null>(null);
   const [checkpointSubmitting, setCheckpointSubmitting] = useState(false);
   const [checkpointWarning, setCheckpointWarning] = useState('');
   const [checkpointError, setCheckpointError] = useState('');
 
   const checkpoints = lesson.videoCheckpoints || [];
-  const videoDuration = lesson.videoDuration || 0;
+  // The player SDK's own reported duration is the source of truth — the
+  // admin-entered `lesson.videoDuration` is only a fallback for the brief
+  // window before the player is ready. Relying solely on the manually
+  // typed field meant a forgotten/blank value (0) silently disabled every
+  // checkpoint, since percentages had nothing to map to.
+  const [sdkDuration, setSdkDuration] = useState(0);
+  const videoDuration = sdkDuration || lesson.videoDuration || 0;
+  const videoDurationRef = useRef(videoDuration);
+  useEffect(() => { videoDurationRef.current = videoDuration; }, [videoDuration]);
 
   useEffect(() => { maxTimeRef.current = maxTimeWatched; }, [maxTimeWatched]);
 
@@ -660,23 +679,38 @@ function LessonVideoPlayer({
   };
 
   const updateEmbedProgress = async () => {
-    if (!playerRef.current || activeCheckpointIndex !== null) return;
+    // This whole function is captured ONCE by the setInterval created in
+    // startEmbedPolling, itself only ever invoked from the mount-time
+    // useEffect below — so every plain state/const read in here (as
+    // opposed to a ref) is frozen at its mount-time value forever. Every
+    // value that can change after mount must come from a ref.
+    if (!playerRef.current || activeCheckpointIndexRef.current !== null) return;
 
     const t = await getEmbedCurrentTime();
-    if (t > maxTimeRef.current) {
+    // Compare against the PREVIOUS max before updating it — updating
+    // maxTimeRef to `t` first (as this used to) makes `t > maxTimeRef +
+    // tolerance` compare `t` against itself, so a forward scrub could
+    // never be detected. This is the only forward-seek signal YouTube's
+    // IFrame API gives us (it has no native onSeek event), so this poll
+    // is the sole enforcement point for YouTube embeds.
+    const previousMax = maxTimeRef.current;
+    if (t > previousMax) {
       maxTimeRef.current = t;
       setMaxTimeWatched(t);
       syncProgress(t);
     }
 
-    if (lesson.blockForwardSeeking && t > maxTimeRef.current + SEEK_TOLERANCE_SECONDS) {
-      await seekEmbed(maxTimeRef.current);
+    if (lesson.blockForwardSeeking && t > previousMax + SEEK_TOLERANCE_SECONDS) {
+      await seekEmbed(previousMax);
+      maxTimeRef.current = previousMax;
+      return;
     }
 
-    if (videoDuration <= 0) return;
+    const currentDuration = videoDurationRef.current;
+    if (currentDuration <= 0) return;
     for (let i = 0; i < checkpoints.length; i++) {
-      if (clearedCheckpoints.has(i)) continue;
-      const targetSeconds = (checkpoints[i].percentage / 100) * videoDuration;
+      if (clearedCheckpointsRef.current.has(i)) continue;
+      const targetSeconds = (checkpoints[i].percentage / 100) * currentDuration;
       if (t >= targetSeconds) {
         pauseEmbed();
         setActiveCheckpointIndex(i);
@@ -722,13 +756,15 @@ function LessonVideoPlayer({
         events: {
           onReady: async () => {
             setEmbedReady(true);
+            const d = playerRef.current.getDuration?.();
+            if (typeof d === 'number' && d > 0) setSdkDuration(d);
             if (maxTimeRef.current > 0) {
               playerRef.current.seekTo(maxTimeRef.current, true);
             }
             startEmbedPolling();
           },
           onStateChange: (event: any) => {
-            if (event.data === 1 && activeCheckpointIndex !== null) {
+            if (event.data === 1 && activeCheckpointIndexRef.current !== null) {
               playerRef.current.pauseVideo();
             }
             if (event.data === 1) {
@@ -761,13 +797,17 @@ function LessonVideoPlayer({
       });
       playerRef.current.on('loaded', async () => {
         setEmbedReady(true);
+        try {
+          const d = await playerRef.current.getDuration();
+          if (typeof d === 'number' && d > 0) setSdkDuration(d);
+        } catch { /* fall back to lesson.videoDuration */ }
         if (maxTimeRef.current > 0) {
           await playerRef.current.setCurrentTime(maxTimeRef.current);
         }
         startEmbedPolling();
       });
       playerRef.current.on('play', () => {
-        if (activeCheckpointIndex !== null) {
+        if (activeCheckpointIndexRef.current !== null) {
           playerRef.current.pause();
         } else {
           startEmbedPolling();
@@ -782,21 +822,25 @@ function LessonVideoPlayer({
         }
       });
       playerRef.current.on('timeupdate', async ({ seconds }: { seconds: number }) => {
-        if (!playerRef.current || activeCheckpointIndex !== null) return;
-        if (seconds > maxTimeRef.current) {
+        if (!playerRef.current || activeCheckpointIndexRef.current !== null) return;
+        const previousMax = maxTimeRef.current;
+        if (seconds > previousMax) {
           maxTimeRef.current = seconds;
           setMaxTimeWatched(seconds);
           syncProgress(seconds);
         }
 
-        if (lesson.blockForwardSeeking && seconds > maxTimeRef.current + SEEK_TOLERANCE_SECONDS) {
-          await seekEmbed(maxTimeRef.current);
+        if (lesson.blockForwardSeeking && seconds > previousMax + SEEK_TOLERANCE_SECONDS) {
+          await seekEmbed(previousMax);
+          maxTimeRef.current = previousMax;
+          return;
         }
 
-        if (videoDuration <= 0) return;
+        const currentDuration = videoDurationRef.current;
+        if (currentDuration <= 0) return;
         for (let i = 0; i < checkpoints.length; i++) {
-          if (clearedCheckpoints.has(i)) continue;
-          const targetSeconds = (checkpoints[i].percentage / 100) * videoDuration;
+          if (clearedCheckpointsRef.current.has(i)) continue;
+          const targetSeconds = (checkpoints[i].percentage / 100) * currentDuration;
           if (seconds >= targetSeconds) {
             playerRef.current.pause();
             setActiveCheckpointIndex(i);
@@ -837,7 +881,9 @@ function LessonVideoPlayer({
   }, [activeCheckpointIndex, video.type]);
 
   const handleLoadedMetadata = () => {
-    if (videoRef.current && maxTimeRef.current > 0) {
+    if (!videoRef.current) return;
+    if (videoRef.current.duration > 0) setSdkDuration(videoRef.current.duration);
+    if (maxTimeRef.current > 0) {
       videoRef.current.currentTime = maxTimeRef.current;
     }
   };
