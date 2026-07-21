@@ -56,6 +56,12 @@ export function SchedulesManage() {
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
 
+  // Bulk import state
+  const [showImport, setShowImport] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ totalRows: number; created: number; failed: number; errors: { row: number; message: string }[] } | null>(null);
+
   // Reference data
   const [schools, setSchools] = useState<SchoolBrief[]>([]);
   const [classes, setClasses] = useState<ClassBrief[]>([]);
@@ -308,6 +314,42 @@ export function SchedulesManage() {
       ? `${t.profile.firstName} ${t.profile.lastName}`
       : (t as any).name || t._id;
 
+  // ── Bulk import ──
+  const handleImportFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setImportFile(e.target.files?.[0] || null);
+    setImportResult(null);
+  };
+
+  const handleImportSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!importFile) return;
+    setImporting(true);
+    setError('');
+    setImportResult(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', importFile);
+      const { data } = await api.post('/class-schedules/bulk-import', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setImportResult(data.data);
+      if (data.data?.created > 0) {
+        setMessage(`Imported ${data.data.created} of ${data.data.totalRows} schedules`);
+        fetchSchedules(page);
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Bulk import failed');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const resetImport = () => {
+    setImportFile(null);
+    setImportResult(null);
+    setShowImport(false);
+  };
+
   const totalPages = Math.ceil(total / limit);
 
   /**
@@ -328,16 +370,89 @@ export function SchedulesManage() {
               {hasFetched ? `${total} total schedules` : 'Apply a filter to view schedules'}
             </p>
           </div>
-          <button
-            onClick={() => { resetForm(); setShowForm(!showForm); }}
-            className="rounded-xl bg-primary-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-primary-700 transition-colors"
-          >
-            {showForm ? 'Cancel' : '+ New Schedule'}
-          </button>
+          <div className="flex gap-3">
+            <button
+              onClick={() => { resetImport(); setShowImport(!showImport); setShowForm(false); }}
+              className="rounded-xl border border-[var(--color-border-default)] px-5 py-2.5 text-sm font-semibold text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-tertiary)] transition-colors"
+            >
+              {showImport ? 'Cancel' : '📥 Bulk Import'}
+            </button>
+            <button
+              onClick={() => { resetForm(); setShowForm(!showForm); setShowImport(false); }}
+              className="rounded-xl bg-primary-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-primary-700 transition-colors"
+            >
+              {showForm ? 'Cancel' : '+ New Schedule'}
+            </button>
+          </div>
         </div>
 
         {message && <div className="rounded-xl border border-green-200 bg-green-50 dark:bg-green-950/30 p-4 text-sm text-green-700">{message}</div>}
         {error && <div className="rounded-xl border border-red-200 bg-red-50 dark:bg-red-950/30 p-4 text-sm text-red-600">{error}</div>}
+
+        {/* ── Bulk Import Panel ── */}
+        {showImport && (
+          <form onSubmit={handleImportSubmit} className="rounded-2xl border border-[var(--color-border-default)] bg-[var(--color-surface-primary)] p-6 shadow-card space-y-4">
+            <div>
+              <h3 className="text-sm font-bold text-[var(--color-text-primary)] mb-1">Bulk Import Schedules</h3>
+              <p className="text-xs text-[var(--color-text-tertiary)]">
+                Upload an Excel (.xlsx) or CSV file with columns:{' '}
+                <span className="font-mono">
+                  {isOrgAdmin ? '' : 'School, '}Class, Section, Course, Teacher Email, Day, Start Time, End Time, Active
+                </span>
+                . Day accepts names (e.g. "Monday") and times accept "07:30" or "7:30 AM" formats.
+              </p>
+            </div>
+
+            <input
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              onChange={handleImportFileChange}
+              className="w-full rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-primary)] px-3 py-2 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-primary-50 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-primary-700 dark:file:bg-primary-950/30 dark:file:text-primary-300"
+            />
+
+            <div className="flex gap-3">
+              <button
+                type="submit"
+                disabled={!importFile || importing}
+                className="rounded-xl bg-primary-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-60"
+              >
+                {importing ? 'Importing...' : 'Upload & Import'}
+              </button>
+              <button type="button" onClick={resetImport} className="rounded-xl border border-[var(--color-border-default)] px-5 py-2.5 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-tertiary)]">
+                Close
+              </button>
+            </div>
+
+            {importResult && (
+              <div className="rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-secondary)] p-4 space-y-2">
+                <p className="text-sm font-semibold text-[var(--color-text-primary)]">
+                  {importResult.created} of {importResult.totalRows} rows imported successfully
+                  {importResult.failed > 0 && ` — ${importResult.failed} failed`}
+                </p>
+                {importResult.errors.length > 0 && (
+                  <div className="max-h-48 overflow-y-auto rounded-lg border border-red-200 dark:border-red-900/40">
+                    <table className="w-full text-xs">
+                      <thead className="bg-red-50 dark:bg-red-950/30 text-left text-red-700 dark:text-red-300">
+                        <tr>
+                          <th className="px-3 py-1.5">Row</th>
+                          <th className="px-3 py-1.5">Error</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-red-100 dark:divide-red-900/30">
+                        {importResult.errors.map((e, idx) => (
+                          <tr key={idx}>
+                            <td className="px-3 py-1.5 text-[var(--color-text-secondary)]">{e.row}</td>
+                            <td className="px-3 py-1.5 text-red-600 dark:text-red-400">{e.message}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+          </form>
+        )}
 
         {/* ── Form ── */}
         {showForm && (

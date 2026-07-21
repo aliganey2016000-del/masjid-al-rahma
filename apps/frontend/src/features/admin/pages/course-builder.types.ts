@@ -194,8 +194,35 @@ export type QuizQuestion =
 
 /** Old records saved before `type` existed are always plain MCQ. */
 export function normalizeQuestion(q: any): QuizQuestion {
-  if (q && q.type) return q as QuizQuestion;
-  return { ...q, type: 'mcq', options: q?.options?.length >= 2 ? q.options : ['', ''], correctIndex: q?.correctIndex ?? 0 };
+  if (!q || !q.type) {
+    return { ...q, type: 'mcq', options: q?.options?.length >= 2 ? q.options : ['', ''], correctIndex: q?.correctIndex ?? 0 };
+  }
+
+  const base = { ...q };
+  switch (q.type) {
+    case 'mcq':
+      return { ...base, options: q.options ?? ['', ''], correctIndex: q.correctIndex ?? 0 } as QuizQuestion;
+    case 'true_false':
+      return { ...base, correctAnswer: q.correctAnswer ?? true } as QuizQuestion;
+    case 'matching':
+      return { ...base, pairs: q.pairs ?? [] } as QuizQuestion;
+    case 'ordering':
+      return { ...base, items: q.items ?? [] } as QuizQuestion;
+    case 'picture_choice':
+      return { ...base, choices: q.choices ?? [], correctIndex: q.correctIndex ?? 0 } as QuizQuestion;
+    case 'swipe_sort':
+      return { ...base, cards: q.cards ?? [], leftLabel: q.leftLabel ?? 'Left', rightLabel: q.rightLabel ?? 'Right' } as QuizQuestion;
+    case 'listen_write':
+      return { ...base, audioUrl: q.audioUrl ?? '', hint: q.hint ?? '' } as QuizQuestion;
+    case 'fill_blank':
+      return { ...base, textTemplate: q.textTemplate ?? '', blanks: q.blanks ?? [], distractors: q.distractors ?? [] } as QuizQuestion;
+    case 'word_scramble':
+      return { ...base, answer: q.answer ?? '', hint: q.hint ?? '' } as QuizQuestion;
+    case 'sentence_build':
+      return { ...base, words: q.words ?? [], distractors: q.distractors ?? [] } as QuizQuestion;
+    default:
+      return base as QuizQuestion;
+  }
 }
 
 export interface QuizItem {

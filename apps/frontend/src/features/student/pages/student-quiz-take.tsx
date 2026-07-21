@@ -1105,6 +1105,7 @@ function OrderingList({
   items: string[]; selected: string[]; onUpdate: (items: string[]) => void; lang: 'en' | 'so' | 'ar';
 }) {
   const currentOrder = selected.length > 0 ? selected : items;
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
 
   // The displayed (possibly already-correct) order only becomes the actual
   // submitted answer once the student touches an up/down button — if the
@@ -1129,14 +1130,31 @@ function OrderingList({
     onUpdate(newOrder);
   };
 
+  const handleDrop = (targetIdx: number) => {
+    if (dragIdx === null || dragIdx === targetIdx) return;
+    const newOrder = [...currentOrder];
+    const [moved] = newOrder.splice(dragIdx, 1);
+    newOrder.splice(targetIdx, 0, moved);
+    onUpdate(newOrder);
+    setDragIdx(null);
+  };
+
   return (
     <div className="space-y-2">
       <p className="text-xs text-[var(--color-text-tertiary)] mb-3 text-center">
         {lang === 'so' ? 'Habee si sax ah adoo riixaya badhamada kor/hoos' : lang === 'ar' ? 'رتب بشكل صحيح باستخدام أزرار الأعلى/الأسفل' : 'Arrange in correct order using up/down buttons'}
       </p>
       {currentOrder.map((item, idx) => (
-        <div key={item} className="flex items-center gap-3">
-          <span className="flex-shrink-0 w-8 h-8 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 flex items-center justify-center text-sm font-bold">
+        <div
+          key={item}
+          draggable
+          onDragStart={() => setDragIdx(idx)}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={() => handleDrop(idx)}
+          onDragEnd={() => setDragIdx(null)}
+          className="flex items-center gap-3"
+        >
+          <span className="cursor-grab flex-shrink-0 w-8 h-8 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 flex items-center justify-center text-sm font-bold">
             {idx + 1}
           </span>
           <div className="flex-1 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-secondary)] px-4 py-3 text-sm font-medium text-[var(--color-text-primary)]">

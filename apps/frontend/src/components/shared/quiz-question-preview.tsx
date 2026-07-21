@@ -25,6 +25,20 @@ export function QuestionPreview({ question, index }: { question: QuizQuestion; i
   const q = normalizeQuestion(question);
   const meta = TYPE_META[q.type] || TYPE_META.mcq;
 
+  const options = q.options ?? [];
+  const pairs = q.pairs ?? [];
+  const items = q.items ?? [];
+  const choices = q.choices ?? [];
+  const cards = q.cards ?? [];
+  const blanks = q.blanks ?? [];
+  const distractors = q.distractors ?? [];
+  const words = q.words ?? [];
+  const answer = q.answer ?? '';
+  const correctText = (q as any).correctText ?? '';
+  const textTemplate = q.textTemplate ?? '';
+  const leftLabel = q.leftLabel ?? 'Left';
+  const rightLabel = q.rightLabel ?? 'Right';
+
   return (
     <div className="rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-secondary)] p-4">
       <div className="flex items-start justify-between gap-2 mb-3">
@@ -38,7 +52,7 @@ export function QuestionPreview({ question, index }: { question: QuizQuestion; i
 
       {q.type === 'mcq' && (
         <div className="space-y-2">
-          {q.options.map((opt, oIdx) => (
+          {options.map((opt, oIdx) => (
             <div
               key={oIdx}
               className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-sm ${
@@ -80,7 +94,7 @@ export function QuestionPreview({ question, index }: { question: QuizQuestion; i
 
       {q.type === 'matching' && (
         <div className="space-y-2">
-          {q.pairs.map((pair, pIdx) => (
+          {pairs.map((pair, pIdx) => (
             <div key={pIdx} className="flex items-center gap-2 text-sm">
               <span className="flex-1 rounded-lg border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/20 px-3 py-2 text-purple-700 dark:text-purple-300 font-medium truncate">
                 {pair.left}
@@ -96,7 +110,7 @@ export function QuestionPreview({ question, index }: { question: QuizQuestion; i
 
       {q.type === 'ordering' && (
         <ol className="space-y-2">
-          {q.items.map((item, iIdx) => (
+          {items.map((item, iIdx) => (
             <li key={iIdx} className="flex items-center gap-3 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
               <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-amber-500 text-white text-xs font-bold">
                 {iIdx + 1}
@@ -109,7 +123,7 @@ export function QuestionPreview({ question, index }: { question: QuizQuestion; i
 
       {q.type === 'picture_choice' && (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          {q.choices.map((choice, cIdx) => (
+          {choices.map((choice, cIdx) => (
             <div
               key={cIdx}
               className={`relative rounded-lg border-2 overflow-hidden ${
@@ -137,10 +151,10 @@ export function QuestionPreview({ question, index }: { question: QuizQuestion; i
       {q.type === 'swipe_sort' && (
         <div className="space-y-2">
           <div className="flex items-center justify-between text-[10px] font-semibold text-[var(--color-text-tertiary)] px-1">
-            <span>⬅ {q.leftLabel}</span>
-            <span>{q.rightLabel} ➡</span>
+            <span>⬅ {leftLabel}</span>
+            <span>{rightLabel} ➡</span>
           </div>
-          {q.cards.map((card, cIdx) => (
+          {cards.map((card, cIdx) => (
             <div
               key={cIdx}
               className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
@@ -161,7 +175,7 @@ export function QuestionPreview({ question, index }: { question: QuizQuestion; i
           {q.audioUrl && <audio controls src={q.audioUrl} className="w-full h-9" />}
           <div className="flex items-center gap-3 rounded-lg border border-cyan-300 bg-cyan-50 dark:bg-cyan-950/20 px-3 py-2 text-sm text-cyan-700 dark:text-cyan-300">
             <span className="w-5 h-5 rounded-full border-2 border-cyan-500 bg-cyan-500 text-white flex items-center justify-center text-xs flex-shrink-0">✓</span>
-            <span className="font-medium">{q.correctText}</span>
+            <span className="font-medium">{correctText}</span>
             <span className="ml-auto text-xs font-semibold">Correct answer</span>
           </div>
           {q.hint && <p className="text-xs text-[var(--color-text-tertiary)] italic">💡 Hint: {q.hint}</p>}
@@ -171,18 +185,18 @@ export function QuestionPreview({ question, index }: { question: QuizQuestion; i
       {q.type === 'fill_blank' && (
         <div className="space-y-2">
           <p className="rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-950/20 px-3 py-2 text-sm text-teal-800 dark:text-teal-200 leading-relaxed">
-            {q.textTemplate.split('___').map((part, i) => (
+            {textTemplate.split('___').map((part, i) => (
               <span key={i}>
                 {part}
-                {i < q.blanks.length && (
-                  <span className="inline-block mx-1 rounded-md bg-teal-500 px-2 py-0.5 text-xs font-bold text-white">{q.blanks[i]}</span>
+                {i < blanks.length && (
+                  <span className="inline-block mx-1 rounded-md bg-teal-500 px-2 py-0.5 text-xs font-bold text-white">{blanks[i]}</span>
                 )}
               </span>
             ))}
           </p>
-          {q.distractors.length > 0 && (
+          {distractors.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
-              {[...q.blanks, ...q.distractors].map((word, wIdx) => (
+              {[...blanks, ...distractors].map((word, wIdx) => (
                 <span key={wIdx} className="rounded-full border border-[var(--color-border-default)] bg-[var(--color-surface-primary)] px-2.5 py-1 text-xs text-[var(--color-text-secondary)]">
                   {word}
                 </span>
@@ -195,7 +209,7 @@ export function QuestionPreview({ question, index }: { question: QuizQuestion; i
       {q.type === 'word_scramble' && (
         <div className="flex items-center gap-3 rounded-lg border border-orange-300 bg-orange-50 dark:bg-orange-950/20 px-3 py-2 text-sm text-orange-700 dark:text-orange-300">
           <span className="w-5 h-5 rounded-full border-2 border-orange-500 bg-orange-500 text-white flex items-center justify-center text-xs flex-shrink-0">✓</span>
-          <span className="font-mono font-bold tracking-widest">{q.answer.toUpperCase()}</span>
+          <span className="font-mono font-bold tracking-widest">{answer.toUpperCase()}</span>
           <span className="ml-auto text-xs font-semibold">Correct spelling</span>
         </div>
       )}
@@ -206,16 +220,16 @@ export function QuestionPreview({ question, index }: { question: QuizQuestion; i
       {q.type === 'sentence_build' && (
         <div className="space-y-2">
           <ol className="flex flex-wrap gap-1.5">
-            {q.words.map((word, wIdx) => (
+            {words.map((word, wIdx) => (
               <li key={wIdx} className="flex items-center gap-1 rounded-full border border-lime-300 dark:border-lime-800 bg-lime-50 dark:bg-lime-950/20 px-2.5 py-1 text-xs font-medium text-lime-700 dark:text-lime-300">
                 <span className="flex h-4 w-4 items-center justify-center rounded-full bg-lime-500 text-white text-[9px] font-bold">{wIdx + 1}</span>
                 {word}
               </li>
             ))}
           </ol>
-          {q.distractors.length > 0 && (
+          {distractors.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
-              {q.distractors.map((word, dIdx) => (
+              {distractors.map((word, dIdx) => (
                 <span key={dIdx} className="rounded-full border border-dashed border-[var(--color-border-default)] px-2.5 py-1 text-xs text-[var(--color-text-tertiary)]">
                   {word}
                 </span>

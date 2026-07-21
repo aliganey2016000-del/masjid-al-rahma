@@ -27,6 +27,7 @@ export function LandingPage() {
   return (
     <>
       <Suspense fallback={<SectionFallback />}><HeroSection /></Suspense>
+      {/* TrustSection removed per request */}
       <Suspense fallback={<SectionFallback />}><WhoIsItForSection /></Suspense>
       <Suspense fallback={<SectionFallback />}><FeaturesSection /></Suspense>
       <Suspense fallback={<SectionFallback />}><MultiTenantSection /></Suspense>
