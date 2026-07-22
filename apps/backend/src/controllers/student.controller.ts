@@ -766,6 +766,7 @@ export const bulkImport = async (req: Request, res: Response): Promise<Response>
   // ── Phase 2: Collect all unique guardian phones and batch-lookup
   // existing parents — then build an in-memory phone→parent map.
   const uniquePhones = new Set<string>();
+  const seenEmails = new Set<string>();
   const parsedRows: any[] = [];
 
   for (let i = 0; i < rows.length; i++) {
@@ -810,6 +811,19 @@ export const bulkImport = async (req: Request, res: Response): Promise<Response>
 
       if (!firstName || !lastName) throw new Error('First Name and Last Name are required');
       if (!email) throw new Error('Email is required');
+
+      // Reject a duplicate email BEFORE it reaches the bulkWrite stage —
+      // without this check, a single already-registered email (extremely
+      // common when re-testing the same import file) reached
+      // User.bulkWrite's ordered:true batch and aborted every other row
+      // in the same import, reporting "0 imported" for an otherwise
+      // entirely valid 300-row file. Checked against both the database and
+      // this batch's own earlier rows (a duplicate pasted twice would
+      // otherwise still collide inside the same bulkWrite call).
+      if (seenEmails.has(email)) throw new Error(`Email "${email}" is duplicated elsewhere in this import`);
+      const existingUser = await User.findOne({ email }).lean();
+      if (existingUser) throw new Error(`Email "${email}" is already registered`);
+      seenEmails.add(email);
 
       // Resolve organization (org_admin always gets ownOrgId; super admin
       // resolves per row but we also pre-fetch classes per school dynamically).
