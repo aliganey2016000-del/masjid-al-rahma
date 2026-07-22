@@ -303,21 +303,34 @@ export function ClassesManage() {
   const [importResult, setImportResult] = useState<{ totalRows: number; created: number; failed: number; errors: { row: number; message: string }[] } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Each of these three is independent — a hiccup fetching schools or
+  // departments (reference data for the filter dropdowns) must never blank
+  // out the class list itself. Promise.all fails fast on the first
+  // rejection, so a single flaky secondary request could wipe out an
+  // otherwise-successful class fetch (e.g. right after a bulk import,
+  // showing "Imported 12 of 12" but then an empty list). Promise.allSettled
+  // lets each piece of state update independently of the others.
   const fetchData = useCallback(async () => {
     setLoading(true); setError('');
-    try {
-      const params: Record<string, string> = {};
-      if (search) params.search = search;
-      if (statusFilter) params.status = statusFilter;
-      const [classesRes, schoolsRes, departmentsRes] = await Promise.all([
-        api.get('/classes', { params }),
-        api.get('/schools', { params: { limit: '100' } }),
-        api.get('/departments'),
-      ]);
-      setClasses(classesRes.data.data || []);
-      setSchools(schoolsRes.data.data || []);
-      setDepartments(departmentsRes.data.data || []);
-    } catch (err: any) { setError(err.response?.data?.message || 'Failed to load data'); } finally { setLoading(false); }
+    const params: Record<string, string> = {};
+    if (search) params.search = search;
+    if (statusFilter) params.status = statusFilter;
+
+    const [classesResult, schoolsResult, departmentsResult] = await Promise.allSettled([
+      api.get('/classes', { params }),
+      api.get('/schools', { params: { limit: '100' } }),
+      api.get('/departments'),
+    ]);
+
+    if (classesResult.status === 'fulfilled') {
+      setClasses(classesResult.value.data.data || []);
+    } else {
+      setError(classesResult.reason?.response?.data?.message || 'Failed to load classes');
+    }
+    if (schoolsResult.status === 'fulfilled') setSchools(schoolsResult.value.data.data || []);
+    if (departmentsResult.status === 'fulfilled') setDepartments(departmentsResult.value.data.data || []);
+
+    setLoading(false);
   }, [search, statusFilter]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -361,7 +374,7 @@ export function ClassesManage() {
       const fd = new FormData(); fd.append('file', selectedFile);
       const { data } = await api.post('/classes/import', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       setImportResult(data.data);
-      if (data.data?.created > 0) { setMessage(`Imported ${data.data.created} of ${data.data.totalRows} classes`); fetchData(); closeImportModal(); }
+      if (data.data?.created > 0) { setMessage(`Imported ${data.data.created} of ${data.data.totalRows} classes`); await fetchData(); closeImportModal(); }
     } catch (err: any) { setError(err.response?.data?.message || 'Import failed'); } finally { setImporting(false); }
   };
 
@@ -382,7 +395,7 @@ export function ClassesManage() {
       const fd = new FormData(); fd.append('file', file);
       const { data } = await api.post('/classes/import', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       setImportResult(data.data);
-      if (data.data?.created > 0) { setMessage(`Imported ${data.data.created} of ${data.data.totalRows} classes`); fetchData(); closeImportModal(); }
+      if (data.data?.created > 0) { setMessage(`Imported ${data.data.created} of ${data.data.totalRows} classes`); await fetchData(); closeImportModal(); }
     } catch (err: any) { setError(err.response?.data?.message || 'Import failed'); } finally { setImporting(false); }
   };
 
