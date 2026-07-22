@@ -54,6 +54,13 @@ router.get(
   asyncHandler(studentController.getAll)
 );
 
+// GET /api/v1/students/stats — Aggregate counts for the Manage Students dashboard
+router.get(
+  '/stats',
+  adminOrTeacher,
+  asyncHandler(studentController.getStats)
+);
+
 // POST /api/v1/students — Create student (admin only)
 router.post(
   '/',

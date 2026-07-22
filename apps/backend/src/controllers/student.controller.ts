@@ -138,6 +138,85 @@ export const getAll = async (req: Request, res: Response): Promise<Response> => 
 };
 
 // ---------------------------------------------------------------------------
+// GET /students/stats — Aggregate counts for the Manage Students dashboard
+// (status, gender, per-class, per-department, per-organization) — scoped by
+// the same tenant rules as getAll, via applyOrgFilter.
+// ---------------------------------------------------------------------------
+
+export const getStats = async (req: Request, res: Response): Promise<Response> => {
+  const scopedFilter = applyOrgFilter(req, {}, 'school') as Record<string, unknown>;
+
+  if (req.user?.role === 'teacher') {
+    const teacher = await getOwnTeacherRecord(req);
+    const teacherCourseIds = teacher ? await Course.find({ teacher: teacher._id }).distinct('_id') : [];
+    scopedFilter.enrolledCourses = { $in: teacherCourseIds };
+  }
+
+  const [
+    statusCounts,
+    genderCounts,
+    classCounts,
+    departmentCounts,
+    organizationCounts,
+    total,
+  ] = await Promise.all([
+    Student.aggregate([
+      { $match: scopedFilter },
+      { $group: { _id: '$status', count: { $sum: 1 } } },
+    ]),
+    Student.aggregate([
+      { $match: scopedFilter },
+      { $lookup: { from: 'profiles', localField: 'profile', foreignField: '_id', as: 'profile' } },
+      { $unwind: { path: '$profile', preserveNullAndEmptyArrays: true } },
+      { $group: { _id: '$profile.gender', count: { $sum: 1 } } },
+    ]),
+    Student.aggregate([
+      { $match: scopedFilter },
+      { $lookup: { from: 'classes', localField: 'class', foreignField: '_id', as: 'class' } },
+      { $unwind: { path: '$class', preserveNullAndEmptyArrays: true } },
+      { $group: { _id: '$class._id', title: { $first: '$class.title' }, section: { $first: '$class.section' }, count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+    ]),
+    Student.aggregate([
+      { $match: scopedFilter },
+      { $group: { _id: '$department', count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+    ]),
+    Student.aggregate([
+      { $match: scopedFilter },
+      { $lookup: { from: 'schools', localField: 'school', foreignField: '_id', as: 'school' } },
+      { $unwind: { path: '$school', preserveNullAndEmptyArrays: true } },
+      { $group: { _id: '$school._id', name: { $first: '$school.name' }, count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+    ]),
+    Student.countDocuments(scopedFilter),
+  ]);
+
+  const asStatusMap = (rows: any[]) => {
+    const map: Record<string, number> = { active: 0, inactive: 0, graduated: 0, suspended: 0 };
+    rows.forEach((r) => { if (r._id && r._id in map) map[r._id] = r.count; });
+    return map;
+  };
+
+  return ApiResponse.success(res, {
+    total,
+    byStatus: asStatusMap(statusCounts),
+    byGender: genderCounts.map((r: any) => ({ gender: r._id || 'unspecified', count: r.count })),
+    byClass: classCounts.map((r: any) => ({
+      classId: r._id ? r._id.toString() : null,
+      label: r._id ? `${r.title || ''} ${r.section || ''}`.trim() : 'Unassigned',
+      count: r.count,
+    })),
+    byDepartment: departmentCounts.map((r: any) => ({ department: r._id || 'Unspecified', count: r.count })),
+    byOrganization: organizationCounts.map((r: any) => ({
+      schoolId: r._id ? r._id.toString() : null,
+      name: r.name || 'Unassigned',
+      count: r.count,
+    })),
+  });
+};
+
+// ---------------------------------------------------------------------------
 // Get Single Student
 // ---------------------------------------------------------------------------
 

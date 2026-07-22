@@ -27,6 +27,15 @@ interface GuardianInfo {
   profile?: { firstName: string; lastName: string };
 }
 
+interface StudentStats {
+  total: number;
+  byStatus: { active: number; inactive: number; graduated: number; suspended: number };
+  byGender: { gender: string; count: number }[];
+  byClass: { classId: string | null; label: string; count: number }[];
+  byDepartment: { department: string; count: number }[];
+  byOrganization: { schoolId: string | null; name: string; count: number }[];
+}
+
 interface Student {
   _id: string;
   studentId: string;
@@ -294,6 +303,115 @@ function ActionsDropdown({ onImport, onExport, exporting }: { onImport: () => vo
 }
 
 // ---------------------------------------------------------------------------
+// Stats / Analytics Section
+// ---------------------------------------------------------------------------
+
+// Fixed categorical order (never cycled per-entity) — series-1..8 map to the
+// validated 8-hue palette (light + dark steps declared once in .viz-root below).
+const VIZ_STYLE = `
+  .viz-root {
+    --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100;
+    --series-5: #e87ba4; --series-6: #008300; --series-7: #4a3aa7; --series-8: #e34948;
+    --status-good: #0ca30c; --status-warning: #fab219; --status-serious: #ec835a; --status-critical: #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root {
+      --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+      --series-5: #d55181; --series-6: #008300; --series-7: #9085e9; --series-8: #e66767;
+    }
+  }
+  :root[data-theme="dark"] .viz-root {
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+    --series-5: #d55181; --series-6: #008300; --series-7: #9085e9; --series-8: #e66767;
+  }
+`;
+
+function foldTop(rows: { label: string; count: number }[], max = 7): { label: string; count: number }[] {
+  const sorted = [...rows].filter(r => r.count > 0).sort((a, b) => b.count - a.count);
+  const head = sorted.slice(0, max);
+  const restCount = sorted.slice(max).reduce((s, r) => s + r.count, 0);
+  if (restCount > 0) head.push({ label: 'Other', count: restCount });
+  return head;
+}
+
+function StatTile({ label, value, colorVar }: { label: string; value: number; colorVar: string }) {
+  return (
+    <div className="rounded-2xl border border-[var(--color-border-default)] bg-[var(--color-surface-primary)] p-4 shadow-card flex flex-col gap-1">
+      <span className="text-xs font-semibold text-[var(--color-text-tertiary)] uppercase tracking-wider truncate">{label}</span>
+      <span className="text-2xl font-bold tabular-nums" style={{ color: `var(${colorVar})` }}>{value.toLocaleString()}</span>
+    </div>
+  );
+}
+
+function BarList({ title, icon, items, colorOffset = 0, emptyLabel }: {
+  title: string; icon: string; items: { label: string; count: number }[]; colorOffset?: number; emptyLabel?: string;
+}) {
+  const max = Math.max(1, ...items.map(i => i.count));
+  return (
+    <div className="viz-root rounded-2xl border border-[var(--color-border-default)] bg-[var(--color-surface-primary)] p-5 shadow-card">
+      <h3 className="text-sm font-bold text-[var(--color-text-primary)] mb-4">{icon} {title}</h3>
+      {items.length === 0 ? (
+        <p className="text-xs text-[var(--color-text-tertiary)]">{emptyLabel || 'No data yet'}</p>
+      ) : (
+        <div className="space-y-2.5">
+          {items.map((item, i) => {
+            const isOther = item.label === 'Other';
+            const colorVar = isOther ? '--color-text-tertiary' : `--series-${((i + colorOffset) % 8) + 1}`;
+            return (
+              <div key={item.label + i}>
+                <div className="flex items-center justify-between mb-1 gap-2">
+                  <span className="text-xs font-medium text-[var(--color-text-secondary)] truncate">{item.label}</span>
+                  <span className="text-xs font-semibold text-[var(--color-text-primary)] tabular-nums flex-shrink-0">{item.count.toLocaleString()}</span>
+                </div>
+                <div className="h-2 w-full rounded-full bg-[var(--color-surface-tertiary)] overflow-hidden" title={`${item.label}: ${item.count}`}>
+                  <div className="h-full rounded-full transition-all duration-300" style={{ width: `${Math.max(3, (item.count / max) * 100)}%`, backgroundColor: `var(${colorVar})` }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatsSection({ stats, loading }: { stats: StudentStats | null; loading: boolean }) {
+  if (loading && !stats) {
+    return <div className="flex justify-center py-8"><div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--color-border-default)] border-t-primary-600" /></div>;
+  }
+  if (!stats) return null;
+
+  const genderLabels: Record<string, string> = { male: 'Male', female: 'Female' };
+  const genderRows = foldTop(stats.byGender.map(g => ({ label: genderLabels[g.gender] || 'Unspecified', count: g.count })), 8);
+  const classRows = foldTop(stats.byClass.map(c => ({ label: c.label, count: c.count })));
+  const deptRows = foldTop(stats.byDepartment.map(d => ({ label: d.department, count: d.count })));
+  const orgRows = foldTop(stats.byOrganization.map(o => ({ label: o.name, count: o.count })));
+
+  return (
+    <div className="viz-root space-y-4">
+      <style>{VIZ_STYLE}</style>
+
+      {/* Stat tiles — Total / Active / Inactive / Graduated / Suspended */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <StatTile label="Total Students" value={stats.total} colorVar="--series-1" />
+        <StatTile label="Active" value={stats.byStatus.active} colorVar="--status-good" />
+        <StatTile label="Inactive" value={stats.byStatus.inactive} colorVar="--color-text-tertiary" />
+        <StatTile label="Graduated" value={stats.byStatus.graduated} colorVar="--series-1" />
+        <StatTile label="Suspended" value={stats.byStatus.suspended} colorVar="--status-critical" />
+      </div>
+
+      {/* Breakdown charts */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <BarList title="By Gender" icon="⚧" items={genderRows} />
+        <BarList title="By Department" icon="🏛️" items={deptRows} colorOffset={2} emptyLabel="No department data" />
+        <BarList title="By Class" icon="📚" items={classRows} colorOffset={4} emptyLabel="No class data" />
+        <BarList title="By Organization" icon="🏫" items={orgRows} colorOffset={6} emptyLabel="No organization data" />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main Component
 // ---------------------------------------------------------------------------
 
@@ -318,6 +436,8 @@ export function StudentsManage() {
   const [editingStudent, setEditingStudent] = useState<Student | undefined>(undefined);
   const [viewingStudent, setViewingStudent] = useState<Student | undefined>(undefined);
   const [approvingStudent, setApprovingStudent] = useState<Student | undefined>(undefined);
+  const [stats, setStats] = useState<StudentStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
   const limit = 15;
 
   // ── Import / Export state ──
@@ -338,13 +458,24 @@ export function StudentsManage() {
   // ── Fetch students ──
   const fetchStudents = useCallback(async (pageNum = 1) => { setLoading(true); setError(''); try { const params: any = { page: String(pageNum), limit: String(limit) }; if (search) params.search = search; if (statusFilter) params.status = statusFilter; if (activeTab === 'pending') params.approvalStatus = 'pending'; else if (activeTab === 'approved') params.approvalStatus = 'approved'; else if (activeTab === 'rejected') params.approvalStatus = 'rejected'; if (filterSchool) params.school = filterSchool; const { data } = await api.get('/students', { params }); setStudents(data.data || []); setTotal(data.meta?.total || 0); setHasFetched(true); } catch (err: any) { setError(err.response?.data?.message || 'Failed to load students'); } finally { setLoading(false); } }, [search, statusFilter, activeTab, filterSchool]);
 
-  useEffect(() => { if (isOrgAdmin) fetchStudents(1); }, [isOrgAdmin]);
+  // ── Fetch stats ──
+  const fetchStats = useCallback(async () => {
+    setStatsLoading(true);
+    try {
+      const params: any = {};
+      if (filterSchool) params.school = filterSchool;
+      const { data } = await api.get('/students/stats', { params });
+      setStats(data.data);
+    } catch { /* non-critical — leave prior stats in place */ } finally { setStatsLoading(false); }
+  }, [filterSchool]);
 
-  const handleApplyFilters = () => { if (isSuperAdmin && !filterSchool) { setError('Please select an organization to view students.'); return; } setPage(1); fetchStudents(1); };
+  useEffect(() => { if (isOrgAdmin) { fetchStudents(1); fetchStats(); } }, [isOrgAdmin]);
+
+  const handleApplyFilters = () => { if (isSuperAdmin && !filterSchool) { setError('Please select an organization to view students.'); return; } setPage(1); fetchStudents(1); fetchStats(); };
   const handlePageChange = (newPage: number) => { setPage(newPage); fetchStudents(newPage); };
-  const handleStatusChange = async (id: string, newStatus: string) => { try { await api.patch(`/students/${id}/status`, { status: newStatus }); setStudents(p => p.map(s => s._id === id ? { ...s, status: newStatus as Student['status'] } : s)); } catch (err: any) { alert(err.response?.data?.message || 'Failed to update status'); } };
-  const handleDelete = async (id: string) => { if (!window.confirm('Deactivate this student?')) return; try { await api.delete(`/students/${id}`); fetchStudents(page); } catch (err: any) { alert(err.response?.data?.message || 'Failed to deactivate'); } };
-  const handleReject = async (id: string) => { if (!window.confirm('Reject this student?')) return; try { await api.patch(`/students/${id}/reject`); fetchStudents(page); } catch (err: any) { alert(err.response?.data?.message || 'Failed to reject'); } };
+  const handleStatusChange = async (id: string, newStatus: string) => { try { await api.patch(`/students/${id}/status`, { status: newStatus }); setStudents(p => p.map(s => s._id === id ? { ...s, status: newStatus as Student['status'] } : s)); fetchStats(); } catch (err: any) { alert(err.response?.data?.message || 'Failed to update status'); } };
+  const handleDelete = async (id: string) => { if (!window.confirm('Deactivate this student?')) return; try { await api.delete(`/students/${id}`); fetchStudents(page); fetchStats(); } catch (err: any) { alert(err.response?.data?.message || 'Failed to deactivate'); } };
+  const handleReject = async (id: string) => { if (!window.confirm('Reject this student?')) return; try { await api.patch(`/students/${id}/reject`); fetchStudents(page); fetchStats(); } catch (err: any) { alert(err.response?.data?.message || 'Failed to reject'); } };
   const totalPages = Math.ceil(total / limit);
 
   // ───────────────────────────────────────────────────────────────────────
@@ -359,11 +490,11 @@ export function StudentsManage() {
   const handleFileDrop = (e: React.DragEvent<HTMLDivElement>) => { e.preventDefault(); setDragOver(false); const file = e.dataTransfer.files?.[0]; if (file) setSelectedFile(file); };
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file) setSelectedFile(file); };
 
-  const submitFileImport = async () => { if (!selectedFile) return; setImporting(true); setError(''); setImportResult(null); try { const formData = new FormData(); formData.append('file', selectedFile); const { data } = await api.post('/students/import', formData); setImportResult(data.data); if (data.data?.created > 0) { setMessage(`Imported ${data.data.created} of ${data.data.totalRows} students`); fetchStudents(page); closeImportModal(); } } catch (err: any) { setError(err.response?.data?.message || 'Import failed'); } finally { setImporting(false); } };
+  const submitFileImport = async () => { if (!selectedFile) return; setImporting(true); setError(''); setImportResult(null); try { const formData = new FormData(); formData.append('file', selectedFile); const { data } = await api.post('/students/import', formData); setImportResult(data.data); if (data.data?.created > 0) { setMessage(`Imported ${data.data.created} of ${data.data.totalRows} students`); fetchStudents(page); fetchStats(); closeImportModal(); } } catch (err: any) { setError(err.response?.data?.message || 'Import failed'); } finally { setImporting(false); } };
 
   const parsePastedRows = (): string[][] => { if (!pasteText.trim()) return []; const lines = pasteText.trim().split(/\r?\n/); return lines.map(line => line.split('\t').map(cell => cell.trim())).filter(row => row.length > 0 && row.some(cell => cell !== '')); };
 
-  const submitPasteImport = async () => { const rows = parsePastedRows(); if (rows.length === 0) { setPasteError('Please paste at least one row of data before submitting.'); return; } if (rows[0].length < 11) { setPasteError(`Expected 12-13 columns (First Name, Last Name, Gender, Email, Password, Organization, Grade/Class, Enrollment Date, Medical Notes, Guardian Name, Guardian Email, Guardian Phone, Relationship). Found ${rows[0].length}.`); return; } const csvContent = rows.map(row => row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(',')).join('\n'); const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' }); const file = new File([blob], 'pasted-students.csv', { type: 'text/csv' }); setImporting(true); setError(''); setImportResult(null); setPasteError(''); try { const formData = new FormData(); formData.append('file', file); const { data } = await api.post('/students/import', formData); setImportResult(data.data); if (data.data?.created > 0) { setMessage(`Imported ${data.data.created} of ${data.data.totalRows} students`); fetchStudents(page); closeImportModal(); } } catch (err: any) { setError(err.response?.data?.message || 'Import failed'); } finally { setImporting(false); } };
+  const submitPasteImport = async () => { const rows = parsePastedRows(); if (rows.length === 0) { setPasteError('Please paste at least one row of data before submitting.'); return; } if (rows[0].length < 11) { setPasteError(`Expected 12-13 columns (First Name, Last Name, Gender, Email, Password, Organization, Grade/Class, Enrollment Date, Medical Notes, Guardian Name, Guardian Email, Guardian Phone, Relationship). Found ${rows[0].length}.`); return; } const csvContent = rows.map(row => row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(',')).join('\n'); const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' }); const file = new File([blob], 'pasted-students.csv', { type: 'text/csv' }); setImporting(true); setError(''); setImportResult(null); setPasteError(''); try { const formData = new FormData(); formData.append('file', file); const { data } = await api.post('/students/import', formData); setImportResult(data.data); if (data.data?.created > 0) { setMessage(`Imported ${data.data.created} of ${data.data.totalRows} students`); fetchStudents(page); fetchStats(); closeImportModal(); } } catch (err: any) { setError(err.response?.data?.message || 'Import failed'); } finally { setImporting(false); } };
 
   // ── Export ──
   const handleExport = async () => { setExporting(true); setError(''); try { const token = localStorage.getItem('accessToken') || ''; const response = await fetch(`${api.defaults.baseURL}/students/export`, { headers: { Authorization: `Bearer ${token}` } }); if (!response.ok) throw new Error('Export failed'); const blob = await response.blob(); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `students-export-${new Date().toISOString().slice(0, 10)}.xlsx`; document.body.appendChild(link); link.click(); document.body.removeChild(link); URL.revokeObjectURL(url); setMessage('Export downloaded successfully'); } catch (err: any) { setError(err.message || 'Export failed'); } finally { setExporting(false); } };
@@ -388,6 +519,9 @@ export function StudentsManage() {
         </div>
 
         {message && <div className="rounded-xl border border-green-200 bg-green-50 dark:bg-green-950/30 p-4 text-sm text-green-700">{message}</div>}
+
+        {/* ── Stats / Analytics ── */}
+        {hasFetched && <StatsSection stats={stats} loading={statsLoading} />}
 
         {/* ═══════════════════════════════════════════════════════════════
             Import Modal
@@ -450,8 +584,8 @@ export function StudentsManage() {
       </div>
 
       {/* Modals */}
-      {showCreate && <StudentModal schools={schools} onClose={() => setShowCreate(false)} onSaved={() => { setShowCreate(false); fetchStudents(page); }} />}
-      {editingStudent && <StudentModal student={editingStudent} schools={schools} onClose={() => setEditingStudent(undefined)} onSaved={() => { setEditingStudent(undefined); fetchStudents(page); }} />}
+      {showCreate && <StudentModal schools={schools} onClose={() => setShowCreate(false)} onSaved={() => { setShowCreate(false); fetchStudents(page); fetchStats(); }} />}
+      {editingStudent && <StudentModal student={editingStudent} schools={schools} onClose={() => setEditingStudent(undefined)} onSaved={() => { setEditingStudent(undefined); fetchStudents(page); fetchStats(); }} />}
       {viewingStudent && <ViewModal student={viewingStudent} onClose={() => setViewingStudent(undefined)} />}
       {approvingStudent && <ApproveModal student={approvingStudent} schools={schools} onClose={() => setApprovingStudent(undefined)} onDone={() => fetchStudents(page)} />}
     </div>
