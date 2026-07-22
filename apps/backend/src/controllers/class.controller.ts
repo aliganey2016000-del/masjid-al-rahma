@@ -342,7 +342,7 @@ export const bulkImport = async (req: Request, res: Response): Promise<Response>
       if (txErr.insertedDocs) inserted = txErr.insertedDocs.length;
       if (txErr.writeErrors) {
         txErr.writeErrors.forEach((we: any) => {
-          errors.push({ row: we.index + 2, message: we.errmsg || 'Insert error' });
+          errors.push({ row: we.index + 2, message: we.err?.errmsg || we.errmsg || 'Insert error' });
         });
       } else if (inserted === 0) {
         errors.push({ row: 0, message: txErr.message || 'Import failed.' });
