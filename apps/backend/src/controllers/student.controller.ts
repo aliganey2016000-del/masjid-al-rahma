@@ -907,7 +907,7 @@ export const bulkImport = async (req: Request, res: Response): Promise<Response>
     item.studentId = `STU-${currentYear}-${String(studentIdBaseCount + idx + 1).padStart(4, '0')}`;
   });
 
-  // ── Phase 3: Create each row sequentially, per-row isolated ──
+  // ── Phase 3: Create each row, per-row isolated, with limited concurrency ──
   // This used to be three separate bulkWrite calls (Users, then Profiles,
   // then Students) with no transaction wrapping them. That's fragile in a
   // way that isn't obvious until it actually happens: User.bulkWrite could
@@ -917,82 +917,116 @@ export const bulkImport = async (req: Request, res: Response): Promise<Response>
   // orphaned User/login records with no matching Profile or Student at
   // all — accounts that exist and can (in principle) log in, but have no
   // student data and permanently block re-importing that same email.
-  // Each row now creates User → Profile → Student (+ guardian) as one
-  // atomic-ish unit with its own try/catch: if any later step in a row
-  // fails, the User/Profile already created *for that row* are deleted
-  // again before moving on, so a partial failure never leaves a dangling
-  // login behind.
-  const newParentsByPhone = new Map<string, { _id: mongoose.Types.ObjectId }>(); // dedup within batch
+  //
+  // Making every row fully sequential fixed that, but made large imports
+  // slow enough to hit the reverse proxy's request timeout (each row was
+  // ~4 sequential network round trips: User, Profile, Student, and often a
+  // guardian). Two changes bring the wall-clock time back down without
+  // reopening the orphaning risk:
+  //   1. Per row, User/Profile/Student are created concurrently (their IDs
+  //      are pre-generated, so none of the three needs to wait on another's
+  //      result — Mongoose doesn't enforce the `user`/`profile` references
+  //      as foreign keys at write time).
+  //   2. Rows themselves run with limited concurrency (a small batch at a
+  //      time) instead of one at a time.
+  // Guardian-by-phone dedup is memoized as an in-flight Promise (not a
+  // resolved value) — if two rows in the same concurrent batch share a
+  // guardian phone, the second one awaits the first's still-running
+  // creation instead of racing to create a duplicate Parent.
+  const newParentsByPhone = new Map<string, Promise<{ _id: mongoose.Types.ObjectId }>>();
   let inserted = 0;
 
-  for (const item of parsedRows) {
-    let createdUserId: mongoose.Types.ObjectId | null = null;
-    let createdProfileId: mongoose.Types.ObjectId | null = null;
+  async function linkGuardian(item: any, studentId: mongoose.Types.ObjectId): Promise<mongoose.Types.ObjectId | undefined> {
+    if (!item.guardianName || !item.guardianPhone) return undefined;
+
+    const schoolKey = item.school?.toString() || 'global';
+    const phoneKey = `${schoolKey}:${item.guardianPhone}`;
+    const existingFromDb = parentPhoneMap.get(phoneKey);
+
+    if (existingFromDb) {
+      await Parent.updateOne({ _id: existingFromDb._id }, { $addToSet: { children: studentId } });
+      return existingFromDb._id;
+    }
+
+    if (!newParentsByPhone.has(phoneKey)) {
+      // Synchronous has()+set() before any await — the only way a second
+      // concurrent row for the same phone could still race in is if it ran
+      // this check between this line and the set() below, which can't
+      // happen in JS's single-threaded event loop (nothing yields control
+      // until the first `await` inside the IIFE).
+      newParentsByPhone.set(phoneKey, (async () => {
+        const [gFirst, ...gRest] = item.guardianName.split(' ');
+        const gLast = gRest.join(' ') || gFirst;
+        const relMap: Record<string, string> = { Father: 'father', Mother: 'mother', Guardian: 'guardian', Other: 'other' };
+
+        const guardianUser = await User.create({
+          email: item.guardianEmail || `${item.email.replace('@', '+parent@')}`,
+          password: await bcrypt.hash(item.guardianPassword || 'guardian123', 10),
+          role: 'parent', organizationId: item.school, phone: item.guardianPhone,
+          isVerified: true, isActive: true,
+        });
+        const guardianProfile = await Profile.create({
+          user: guardianUser._id, firstName: gFirst, lastName: gLast, gender: 'male',
+        });
+        const parent = await Parent.create({
+          user: guardianUser._id, profile: guardianProfile._id,
+          school: item.school, phone: item.guardianPhone,
+          relationship: relMap[item.relationship] || 'father',
+          children: [studentId], status: 'active',
+        });
+        return { _id: parent._id };
+      })());
+    } else {
+      // A different row already created this parent — just add this child.
+      const parentRef = await newParentsByPhone.get(phoneKey)!;
+      await Parent.updateOne({ _id: parentRef._id }, { $addToSet: { children: studentId } });
+      return parentRef._id;
+    }
+
+    const parentRef = await newParentsByPhone.get(phoneKey)!;
+    return parentRef._id;
+  }
+
+  async function importRow(item: any): Promise<void> {
+    const userId = new mongoose.Types.ObjectId();
+    const profileId = new mongoose.Types.ObjectId();
+    const studentId = new mongoose.Types.ObjectId();
+
     try {
-      const user = await User.create({
-        email: item.email, password: item.hashedPassword, role: 'student',
-        organizationId: item.school, isVerified: true, isActive: true, preferredLanguage: 'en',
-      });
-      createdUserId = user._id;
+      await Promise.all([
+        User.create({
+          _id: userId, email: item.email, password: item.hashedPassword, role: 'student',
+          organizationId: item.school, isVerified: true, isActive: true, preferredLanguage: 'en',
+        }),
+        Profile.create({
+          _id: profileId, user: userId, firstName: item.firstName, lastName: item.lastName, gender: item.gender,
+        }),
+        Student.create({
+          _id: studentId, studentId: item.studentId, user: userId, profile: profileId,
+          school: item.school, class: item.classId,
+          department: item.department, shiftMode: item.shiftMode,
+          enrollmentDate: item.enrollmentDate, medicalNotes: item.medicalNotes,
+          approvalStatus: 'approved', status: 'active',
+        }),
+      ]);
 
-      const profile = await Profile.create({
-        user: user._id, firstName: item.firstName, lastName: item.lastName, gender: item.gender,
-      });
-      createdProfileId = profile._id;
-
-      const student = await Student.create({
-        studentId: item.studentId, user: user._id, profile: profile._id,
-        school: item.school, class: item.classId,
-        department: item.department, shiftMode: item.shiftMode,
-        enrollmentDate: item.enrollmentDate, medicalNotes: item.medicalNotes,
-        approvalStatus: 'approved', status: 'active',
-      });
-
-      // Guardian upsert-and-link by phone — same dedup logic as before,
-      // just executed sequentially instead of batched.
-      if (item.guardianName && item.guardianPhone) {
-        const schoolKey = item.school?.toString() || 'global';
-        const phoneKey = `${schoolKey}:${item.guardianPhone}`;
-        const existing = parentPhoneMap.get(phoneKey) || newParentsByPhone.get(phoneKey);
-
-        if (existing) {
-          await Parent.updateOne({ _id: existing._id }, { $addToSet: { children: student._id } });
-          student.parent = existing._id;
-        } else {
-          const [gFirst, ...gRest] = item.guardianName.split(' ');
-          const gLast = gRest.join(' ') || gFirst;
-
-          const guardianUser = await User.create({
-            email: item.guardianEmail || `${item.email.replace('@', '+parent@')}`,
-            password: await bcrypt.hash(item.guardianPassword || 'guardian123', 10),
-            role: 'parent', organizationId: item.school, phone: item.guardianPhone,
-            isVerified: true, isActive: true,
-          });
-          const guardianProfile = await Profile.create({
-            user: guardianUser._id, firstName: gFirst, lastName: gLast, gender: 'male',
-          });
-          const relMap: Record<string, string> = { Father: 'father', Mother: 'mother', Guardian: 'guardian', Other: 'other' };
-          const parent = await Parent.create({
-            user: guardianUser._id, profile: guardianProfile._id,
-            school: item.school, phone: item.guardianPhone,
-            relationship: relMap[item.relationship] || 'father',
-            children: [student._id], status: 'active',
-          });
-
-          student.parent = parent._id;
-          newParentsByPhone.set(phoneKey, { _id: parent._id });
-        }
-        await student.save();
-      }
+      const parentId = await linkGuardian(item, studentId);
+      if (parentId) await Student.updateOne({ _id: studentId }, { parent: parentId });
 
       inserted++;
     } catch (rowErr: any) {
       // Undo whatever this row managed to create, so a mid-row failure
-      // never leaves an orphaned User/Profile with no Student behind.
-      if (createdProfileId) await Profile.deleteOne({ _id: createdProfileId }).catch(() => {});
-      if (createdUserId) await User.deleteOne({ _id: createdUserId }).catch(() => {});
+      // never leaves an orphaned User/Profile/Student behind.
+      await Student.deleteOne({ _id: studentId }).catch(() => {});
+      await Profile.deleteOne({ _id: profileId }).catch(() => {});
+      await User.deleteOne({ _id: userId }).catch(() => {});
       errors.push({ row: item.rowNum, message: rowErr.message || 'Insert failed' });
     }
+  }
+
+  const CONCURRENCY = 10;
+  for (let i = 0; i < parsedRows.length; i += CONCURRENCY) {
+    await Promise.all(parsedRows.slice(i, i + CONCURRENCY).map(importRow));
   }
 
   return ApiResponse.success(res, {
