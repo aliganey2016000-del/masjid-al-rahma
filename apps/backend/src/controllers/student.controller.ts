@@ -902,149 +902,91 @@ export const bulkImport = async (req: Request, res: Response): Promise<Response>
     item.studentId = `STU-${currentYear}-${String(studentIdBaseCount + idx + 1).padStart(4, '0')}`;
   });
 
-  // ── Phase 3: BulkWrite operations
-  // No transaction — this deployment's MongoDB is a standalone instance (no
-  // replica set), which doesn't support transactions; session.withTransaction()
-  // throws immediately there, and previously reported "0 imported" with no
-  // explanation whenever it did (the thrown error isn't a BulkWriteError, so
-  // it has no .writeErrors and nothing got surfaced). Each bulkWrite below
-  // now runs as a plain (non-transactional) operation.
+  // ── Phase 3: Create each row sequentially, per-row isolated ──
+  // This used to be three separate bulkWrite calls (Users, then Profiles,
+  // then Students) with no transaction wrapping them. That's fragile in a
+  // way that isn't obvious until it actually happens: User.bulkWrite could
+  // fully succeed while Profile.bulkWrite failed right after (a single bad
+  // document, ordered:true stopping the batch, etc.), and since nothing
+  // rolls back without a transaction, this left real, confirmed-in-prod
+  // orphaned User/login records with no matching Profile or Student at
+  // all — accounts that exist and can (in principle) log in, but have no
+  // student data and permanently block re-importing that same email.
+  // Each row now creates User → Profile → Student (+ guardian) as one
+  // atomic-ish unit with its own try/catch: if any later step in a row
+  // fails, the User/Profile already created *for that row* are deleted
+  // again before moving on, so a partial failure never leaves a dangling
+  // login behind.
+  const newParentsByPhone = new Map<string, { _id: mongoose.Types.ObjectId }>(); // dedup within batch
   let inserted = 0;
-  if (parsedRows.length > 0) {
+
+  for (const item of parsedRows) {
+    let createdUserId: mongoose.Types.ObjectId | null = null;
+    let createdProfileId: mongoose.Types.ObjectId | null = null;
     try {
-      {
-        const userBulkOps: any[] = [];
-        const profileBulkOps: any[] = [];
-        const studentBulkOps: any[] = [];
-        const parentUpdates: any[] = []; // for linking parent→child afterward
-        const newParentsByPhone = new Map<string, { _id: mongoose.Types.ObjectId }>(); // dedup within batch
+      const user = await User.create({
+        email: item.email, password: item.hashedPassword, role: 'student',
+        organizationId: item.school, isVerified: true, isActive: true, preferredLanguage: 'en',
+      });
+      createdUserId = user._id;
 
-        for (const item of parsedRows) {
-          const userId = new mongoose.Types.ObjectId();
-          const profileId = new mongoose.Types.ObjectId();
-          const studentId = new mongoose.Types.ObjectId();
+      const profile = await Profile.create({
+        user: user._id, firstName: item.firstName, lastName: item.lastName, gender: item.gender,
+      });
+      createdProfileId = profile._id;
 
-          // User insertOne
-          userBulkOps.push({
-            insertOne: {
-              document: {
-                _id: userId, email: item.email, password: item.hashedPassword,
-                role: 'student', organizationId: item.school, isVerified: true,
-                isActive: true, preferredLanguage: 'en',
-              },
-            },
+      const student = await Student.create({
+        studentId: item.studentId, user: user._id, profile: profile._id,
+        school: item.school, class: item.classId,
+        department: item.department, shiftMode: item.shiftMode,
+        enrollmentDate: item.enrollmentDate, medicalNotes: item.medicalNotes,
+        approvalStatus: 'approved', status: 'active',
+      });
+
+      // Guardian upsert-and-link by phone — same dedup logic as before,
+      // just executed sequentially instead of batched.
+      if (item.guardianName && item.guardianPhone) {
+        const schoolKey = item.school?.toString() || 'global';
+        const phoneKey = `${schoolKey}:${item.guardianPhone}`;
+        const existing = parentPhoneMap.get(phoneKey) || newParentsByPhone.get(phoneKey);
+
+        if (existing) {
+          await Parent.updateOne({ _id: existing._id }, { $addToSet: { children: student._id } });
+          student.parent = existing._id;
+        } else {
+          const [gFirst, ...gRest] = item.guardianName.split(' ');
+          const gLast = gRest.join(' ') || gFirst;
+
+          const guardianUser = await User.create({
+            email: item.guardianEmail || `${item.email.replace('@', '+parent@')}`,
+            password: await bcrypt.hash(item.guardianPassword || 'guardian123', 10),
+            role: 'parent', organizationId: item.school, phone: item.guardianPhone,
+            isVerified: true, isActive: true,
+          });
+          const guardianProfile = await Profile.create({
+            user: guardianUser._id, firstName: gFirst, lastName: gLast, gender: 'male',
+          });
+          const relMap: Record<string, string> = { Father: 'father', Mother: 'mother', Guardian: 'guardian', Other: 'other' };
+          const parent = await Parent.create({
+            user: guardianUser._id, profile: guardianProfile._id,
+            school: item.school, phone: item.guardianPhone,
+            relationship: relMap[item.relationship] || 'father',
+            children: [student._id], status: 'active',
           });
 
-          // Profile insertOne
-          profileBulkOps.push({
-            insertOne: {
-              document: {
-                _id: profileId, user: userId, firstName: item.firstName,
-                lastName: item.lastName, gender: item.gender,
-              },
-            },
-          });
-
-          // Student upsert — matched by the studentId generated above
-          // instead of a raw insertOne. If that studentId ever collides
-          // with an existing record (e.g. a partially-committed earlier
-          // run), this updates that record's fields instead of throwing
-          // an E11000 and rolling back the entire batch.
-          studentBulkOps.push({
-            updateOne: {
-              filter: { studentId: item.studentId },
-              update: {
-                $setOnInsert: { _id: studentId, studentId: item.studentId },
-                $set: {
-                  user: userId, profile: profileId,
-                  school: item.school, class: item.classId,
-                  department: item.department, shiftMode: item.shiftMode,
-                  enrollmentDate: item.enrollmentDate, medicalNotes: item.medicalNotes,
-                  approvalStatus: 'approved', status: 'active',
-                },
-              },
-              upsert: true,
-            },
-          });
-
-          // Handle guardian linking
-          if (item.guardianName && item.guardianPhone) {
-            const schoolKey = item.school?.toString() || 'global';
-            const existing = parentPhoneMap.get(`${schoolKey}:${item.guardianPhone}`) || newParentsByPhone.get(`${schoolKey}:${item.guardianPhone}`);
-            if (existing) {
-              // Link to existing parent — push child into children array
-              parentUpdates.push({
-                updateOne: {
-                  filter: { _id: existing._id },
-                  update: { $addToSet: { children: studentId } },
-                },
-              });
-              // Point student.parent to the existing parent
-              studentBulkOps[studentBulkOps.length - 1].updateOne.update.$set.parent = existing._id;
-            } else {
-              // Create new parent
-              const guardianUserId = new mongoose.Types.ObjectId();
-              const guardianProfileId = new mongoose.Types.ObjectId();
-              const guardianParentId = new mongoose.Types.ObjectId();
-
-              const [gFirst, ...gRest] = item.guardianName.split(' ');
-              const gLast = gRest.join(' ') || gFirst;
-
-              userBulkOps.push({
-                insertOne: {
-                  document: {
-                    _id: guardianUserId, email: item.guardianEmail || `${item.email.replace('@', '+parent@')}`,
-                    password: await bcrypt.hash(item.guardianPassword || 'guardian123', 10),
-                    role: 'parent', organizationId: item.school, phone: item.guardianPhone,
-                    isVerified: true, isActive: true, preferredLanguage: 'en',
-                  },
-                },
-              });
-
-              profileBulkOps.push({
-                insertOne: {
-                  document: { _id: guardianProfileId, user: guardianUserId, firstName: gFirst, lastName: gLast, gender: 'male' },
-                },
-              });
-
-              const relMap: Record<string, string> = { Father: 'father', Mother: 'mother', Guardian: 'guardian', Other: 'other' };
-              parentUpdates.push({
-                insertOne: {
-                  document: {
-                    _id: guardianParentId, user: guardianUserId, profile: guardianProfileId,
-                    school: item.school, phone: item.guardianPhone,
-                    relationship: relMap[item.relationship] || 'father',
-                    children: [studentId], status: 'active',
-                  },
-                },
-              });
-
-              studentBulkOps[studentBulkOps.length - 1].updateOne.update.$set.parent = guardianParentId;
-              newParentsByPhone.set(`${schoolKey}:${item.guardianPhone}`, { _id: guardianParentId });
-            }
-          }
+          student.parent = parent._id;
+          newParentsByPhone.set(phoneKey, { _id: parent._id });
         }
+        await student.save();
+      }
 
-        // Execute all bulk writes
-        if (userBulkOps.length > 0) await User.bulkWrite(userBulkOps, { ordered: true });
-        if (profileBulkOps.length > 0) await Profile.bulkWrite(profileBulkOps, { ordered: true });
-        if (studentBulkOps.length > 0) {
-          // These are `updateOne` upserts now, not `insertOne`s — a brand
-          // new student surfaces under `upsertedCount`; `insertedCount`
-          // would always read 0 for this op type.
-          const result = await Student.bulkWrite(studentBulkOps, { ordered: true });
-          inserted = result.upsertedCount + result.modifiedCount;
-        }
-        if (parentUpdates.length > 0) await Parent.bulkWrite(parentUpdates, { ordered: false });
-      }
-    } catch (txErr: any) {
-      if (txErr.writeErrors) {
-        txErr.writeErrors.forEach((we: any) => {
-          errors.push({ row: we.index + 2, message: we.errmsg || 'Insert error' });
-        });
-      } else {
-        errors.push({ row: 0, message: txErr.message || 'Import failed.' });
-      }
+      inserted++;
+    } catch (rowErr: any) {
+      // Undo whatever this row managed to create, so a mid-row failure
+      // never leaves an orphaned User/Profile with no Student behind.
+      if (createdProfileId) await Profile.deleteOne({ _id: createdProfileId }).catch(() => {});
+      if (createdUserId) await User.deleteOne({ _id: createdUserId }).catch(() => {});
+      errors.push({ row: item.rowNum, message: rowErr.message || 'Insert failed' });
     }
   }
 
