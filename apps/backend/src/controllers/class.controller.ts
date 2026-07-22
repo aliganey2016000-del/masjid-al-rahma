@@ -35,6 +35,13 @@ export const getAll = async (req: Request, res: Response): Promise<Response> => 
   const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
   const limitNum = Math.max(1, Math.min(200, parseInt(limit as string, 10) || 50));
 
+  // TEMP DIAGNOSTIC — remove once the "import succeeds but list is empty"
+  // bug is confirmed fixed. Logs to stdout (visible in Coolify runtime logs).
+  console.log(
+    '[class.getAll] role:', req.user?.role, 'organizationId:', req.user?.organizationId,
+    'scopedFilter:', JSON.stringify(scopedFilter)
+  );
+
   const [classes, total] = await Promise.all([
     ClassModel.find(scopedFilter)
       .populate('school', 'name')
@@ -47,6 +54,10 @@ export const getAll = async (req: Request, res: Response): Promise<Response> => 
       .lean(),
     ClassModel.countDocuments(scopedFilter),
   ]);
+
+  console.log('[class.getAll] found', classes.length, 'of total', total);
+  const rawCountAll = await ClassModel.countDocuments({});
+  console.log('[class.getAll] total classes in entire DB (unscoped):', rawCountAll);
 
   const normalizedClasses = (classes as any[]).map((c: any) => ({
     ...c,
@@ -328,13 +339,22 @@ export const bulkImport = async (req: Request, res: Response): Promise<Response>
 
   let inserted = 0;
   if (documents.length > 0) {
+    // TEMP DIAGNOSTIC — remove once the "import succeeds but list is empty"
+    // bug is confirmed fixed. Logs to stdout (visible in Coolify runtime logs).
+    console.log(
+      '[class.bulkImport] about to insert', documents.length, 'docs. ownOrgId:', ownOrgId,
+      'sample school value:', documents[0]?.school, typeof documents[0]?.school
+    );
+
     const session = await mongoose.startSession();
     try {
       await session.withTransaction(async () => {
         const result = await ClassModel.insertMany(documents, { session, ordered: false });
         inserted = result.length;
       });
+      console.log('[class.bulkImport] transaction committed. inserted:', inserted);
     } catch (txErr: any) {
+      console.log('[class.bulkImport] transaction THREW:', txErr?.message, 'code:', txErr?.code, 'codeName:', txErr?.codeName);
       if (txErr.insertedDocs) inserted = txErr.insertedDocs.length;
       if (txErr.writeErrors) {
         txErr.writeErrors.forEach((we: any) => {
@@ -344,6 +364,13 @@ export const bulkImport = async (req: Request, res: Response): Promise<Response>
     } finally {
       await session.endSession();
     }
+
+    // Read-after-write verification, OUTSIDE the transaction/session, on a
+    // fresh query — proves whether the insert is actually durable.
+    const verifyFilter = ownOrgId ? { school: new mongoose.Types.ObjectId(ownOrgId) } : {};
+    const verifyCount = await ClassModel.countDocuments(verifyFilter);
+    const verifyTotal = await ClassModel.countDocuments({});
+    console.log('[class.bulkImport] verify: count for this org =', verifyCount, '| total classes in DB =', verifyTotal);
   }
 
   return ApiResponse.success(res, {
