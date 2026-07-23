@@ -11,14 +11,14 @@
 
 import { useEffect, useRef, useState } from 'react';
 import {
-  ArrowUp, ArrowDown, Trash2, PenLine, Sparkles, Loader2, CheckCircle2,
-  RefreshCw, Pencil, Plus, X, AlertCircle, CircleCheck,
+  ArrowUp, ArrowDown, Trash2, PenLine, Sparkles,
+  Pencil, Plus, X, CircleCheck,
 } from 'lucide-react';
 import type { ContentBlock, ContentBlockQuestion, QuestionType } from '../course-builder.types';
 import { normalizeQuestion, getBlockQuestions } from '../course-builder.types';
 import { QUESTION_TYPE_META, QUESTION_TYPE_ORDER } from '../quiz-question-meta';
 import { RichTextEditor } from './rich-text-editor';
-import api from '../../../../lib/axios';
+import { StopCheckAiGeneratorModal } from './stop-check-ai-generator-modal';
 
 interface ContentBlockEditorProps {
   blocks: ContentBlock[];
@@ -39,10 +39,6 @@ export function emptyManualQuestion(): ContentBlockQuestion {
     ...normalizeQuestion({ type: 'mcq' }),
     aiGenerated: false,
   };
-}
-
-function plainText(html: string): string {
-  return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 export function ContentBlockEditor({ blocks, onChange, defaultMinReadSeconds }: ContentBlockEditorProps) {
@@ -203,6 +199,7 @@ function BlockCard({
 
 function NewQuestionComposer({ blockContent, onAdd }: { blockContent: string; onAdd: (q: ContentBlockQuestion) => void }) {
   const [draft, setDraft] = useState<ContentBlockQuestion | undefined>(undefined);
+  const [showAiModal, setShowAiModal] = useState(false);
 
   const commit = () => {
     if (!draft) return;
@@ -212,7 +209,7 @@ function NewQuestionComposer({ blockContent, onAdd }: { blockContent: string; on
 
   return (
     <div className="rounded-xl border border-dashed border-[var(--color-border-default)] p-3 space-y-2">
-      <QuestionBuilder blockContent={blockContent} question={draft} onChange={setDraft} />
+      <QuestionBuilder blockContent={blockContent} question={draft} onChange={setDraft} onOpenAiGenerator={() => setShowAiModal(true)} />
       {draft && (
         <div className="flex gap-2 pt-1">
           <button type="button" onClick={commit} className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-700 transition-colors">
@@ -223,6 +220,12 @@ function NewQuestionComposer({ blockContent, onAdd }: { blockContent: string; on
           </button>
         </div>
       )}
+      <StopCheckAiGeneratorModal
+        isOpen={showAiModal}
+        onClose={() => setShowAiModal(false)}
+        blockContent={blockContent}
+        onGenerated={(questions) => questions.forEach(onAdd)}
+      />
     </div>
   );
 }
@@ -232,68 +235,33 @@ function NewQuestionComposer({ blockContent, onAdd }: { blockContent: string; on
 // ---------------------------------------------------------------------------
 
 type QuestionMode = 'manual' | 'ai';
-type AiPhase = 'idle' | 'loading' | 'preview' | 'error';
 
 function QuestionBuilder({
-  blockContent, question, onChange,
+  blockContent, question, onChange, onOpenAiGenerator,
 }: {
   blockContent: string;
   question: ContentBlockQuestion | undefined;
   onChange: (q: ContentBlockQuestion | undefined) => void;
+  /** Opens the batch AI generator (type + count matrix) instead of a single inline question. */
+  onOpenAiGenerator?: () => void;
 }) {
   const [questionMode, setQuestionMode] = useState<QuestionMode | null>(
     question ? (question.aiGenerated ? 'ai' : 'manual') : null
   );
-  const [aiPhase, setAiPhase] = useState<AiPhase>('idle');
-  const [aiDraft, setAiDraft] = useState<ContentBlockQuestion | null>(null);
-  const [aiError, setAiError] = useState('');
   const [editingCommitted, setEditingCommitted] = useState(false);
 
   // "Remove question" clears `question` in the parent, but this component's
   // own `questionMode` ('manual'/'ai') is local state that otherwise never
   // resets — leaving it stuck on the old mode falls through every branch
   // below into `return null`, hiding the Add Manually/AI Generator picker.
-  // A defined→undefined transition can only come from that external Remove
-  // (the AI flow never itself clears an already-committed question), so
-  // resetting here is safe.
   const prevQuestionRef = useRef(question);
   useEffect(() => {
     if (prevQuestionRef.current && !question) {
       setQuestionMode(null);
-      setAiPhase('idle');
-      setAiDraft(null);
-      setAiError('');
       setEditingCommitted(false);
     }
     prevQuestionRef.current = question;
   }, [question]);
-
-  const hasBlockText = plainText(blockContent).length > 0;
-
-  const runGenerate = async () => {
-    setAiPhase('loading');
-    setAiError('');
-    try {
-      const { data } = await api.post('/ai/generate-stop-check-question', { blockText: plainText(blockContent) });
-      setAiDraft(data.data.question);
-      setAiPhase('preview');
-    } catch (err: any) {
-      setAiError(err.response?.data?.message || 'Failed to generate a question. Please try again.');
-      setAiPhase('error');
-    }
-  };
-
-  const keepDraft = () => {
-    if (!aiDraft) return;
-    onChange(aiDraft);
-    setEditingCommitted(false);
-  };
-
-  const editDraft = () => {
-    if (!aiDraft) return;
-    onChange(aiDraft);
-    setEditingCommitted(true);
-  };
 
   // ── No question yet: show the mode chooser ──
   if (!question && questionMode === null) {
@@ -309,8 +277,9 @@ function QuestionBuilder({
         </button>
         <button
           type="button"
-          onClick={() => setQuestionMode('ai')}
-          className="flex flex-col items-center gap-1.5 rounded-xl border-2 border-violet-300 dark:border-violet-800 bg-gradient-to-b from-violet-50 to-indigo-50 dark:from-violet-950/30 dark:to-indigo-950/30 px-4 py-4 text-center hover:border-violet-500 transition-colors"
+          onClick={onOpenAiGenerator}
+          disabled={!onOpenAiGenerator}
+          className="flex flex-col items-center gap-1.5 rounded-xl border-2 border-violet-300 dark:border-violet-800 bg-gradient-to-b from-violet-50 to-indigo-50 dark:from-violet-950/30 dark:to-indigo-950/30 px-4 py-4 text-center hover:border-violet-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Sparkles className="h-5 w-5 text-violet-600 dark:text-violet-400" />
           <span className="text-xs font-semibold text-violet-700 dark:text-violet-300">AI Generator</span>
@@ -319,84 +288,7 @@ function QuestionBuilder({
     );
   }
 
-  // ── AI mode, no committed question yet: idle / loading / preview / error ──
-  if (questionMode === 'ai' && !question) {
-    return (
-      <div className="rounded-xl border border-violet-200 dark:border-violet-800 bg-gradient-to-b from-violet-50/50 to-indigo-50/50 dark:from-violet-950/20 dark:to-indigo-950/20 p-4 space-y-3">
-        {aiPhase === 'idle' && (
-          <div className="text-center space-y-2">
-            <button
-              type="button"
-              onClick={runGenerate}
-              disabled={!hasBlockText}
-              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:from-violet-700 hover:to-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Sparkles className="h-4 w-4" /> Analyze & Generate Question
-            </button>
-            {!hasBlockText && (
-              <p className="flex items-center justify-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
-                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                Please write some paragraph content first so AI can analyze it.
-              </p>
-            )}
-            <p>
-              <button type="button" onClick={() => setQuestionMode(null)} className="text-xs text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] hover:underline">
-                ← Back to options
-              </button>
-            </p>
-          </div>
-        )}
-
-        {aiPhase === 'loading' && (
-          <div className="flex flex-col items-center gap-2 py-3 text-center">
-            <Loader2 className="h-6 w-6 animate-spin text-violet-600 dark:text-violet-400" />
-            <p className="text-xs text-[var(--color-text-secondary)]">AI is analyzing the block content and generating a question...</p>
-            <div className="w-full space-y-1.5 pt-1">
-              <div className="h-2.5 w-3/4 mx-auto rounded bg-violet-200/70 dark:bg-violet-800/40 animate-pulse" />
-              <div className="h-2.5 w-1/2 mx-auto rounded bg-violet-200/70 dark:bg-violet-800/40 animate-pulse" />
-            </div>
-          </div>
-        )}
-
-        {aiPhase === 'error' && (
-          <div className="text-center space-y-2">
-            <p className="flex items-center justify-center gap-1.5 text-xs text-red-600 dark:text-red-400">
-              <AlertCircle className="h-3.5 w-3.5 shrink-0" /> {aiError}
-            </p>
-            <button
-              type="button"
-              onClick={runGenerate}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border-default)] px-3 py-1.5 text-xs font-semibold hover:bg-[var(--color-surface-tertiary)] transition-colors"
-            >
-              <RefreshCw className="h-3.5 w-3.5" /> Try Again
-            </button>
-          </div>
-        )}
-
-        {aiPhase === 'preview' && aiDraft && (
-          <div className="space-y-3">
-            <div className="flex items-center gap-1.5 text-xs font-semibold text-violet-700 dark:text-violet-300">
-              <Sparkles className="h-3.5 w-3.5" /> Generated question — review before adding
-            </div>
-            <QuestionPreviewCard draft={aiDraft} />
-            <div className="grid grid-cols-3 gap-2 pt-1">
-              <button type="button" onClick={editDraft} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-primary)] px-2 py-2 text-xs font-semibold hover:bg-[var(--color-surface-tertiary)] transition-colors">
-                <Pencil className="h-3.5 w-3.5" /> Edit
-              </button>
-              <button type="button" onClick={keepDraft} className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-2 py-2 text-xs font-semibold text-white hover:bg-primary-700 transition-colors">
-                <CheckCircle2 className="h-3.5 w-3.5" /> Keep
-              </button>
-              <button type="button" onClick={runGenerate} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-primary)] px-2 py-2 text-xs font-semibold hover:bg-[var(--color-surface-tertiary)] transition-colors">
-                <RefreshCw className="h-3.5 w-3.5" /> Regenerate
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // ── Question committed (manual, or AI "Keep"/"Edit") ──
+  // ── Question committed (manual, or AI-generated) ──
   if (question) {
     // AI "Keep" (not editing): compact summary, matching a settled/accepted state.
     if (question.aiGenerated && !editingCommitted) {
