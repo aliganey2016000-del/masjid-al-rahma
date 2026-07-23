@@ -90,8 +90,8 @@ export const generateQuiz = async (req: Request, res: Response): Promise<Respons
     throw new BadRequestError('mode must be "content" or "topic".');
   }
 
-  const questions = await generateQuizQuestions(sourceText, customInstructions || '', questionCounts);
-  return ApiResponse.success(res, { questions }, 'Quiz questions generated successfully');
+  const result = await generateQuizQuestions(sourceText, customInstructions || '', questionCounts);
+  return ApiResponse.success(res, result, 'Quiz questions generated successfully');
 };
 
 // ---------------------------------------------------------------------------

@@ -291,11 +291,53 @@ const QUESTION_SHAPES = `
 "sentence_build": { "type": "sentence_build", "question": string, "words": string[] (the sentence's words in the CORRECT order), "distractors": string[] (2-4 decoy words), "explanation": string, "points": number }
 `.trim();
 
+const callDeepSeekForQuestions = async (apiKey: string, messages: { role: string; content: string }[]): Promise<any[]> => {
+  let response;
+  try {
+    response = await axios.post(
+      DEEPSEEK_API_URL,
+      {
+        model: 'deepseek-chat',
+        messages,
+        temperature: 0.6,
+        max_tokens: 4000,
+        response_format: { type: 'json_object' },
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 90_000,
+      }
+    );
+  } catch (err: any) {
+    const status = err.response?.status;
+    const detail = err.response?.data?.error?.message || err.message;
+    throw new InternalServerError(`DeepSeek request failed${status ? ` (${status})` : ''}: ${detail}`);
+  }
+
+  const raw: string = response.data?.choices?.[0]?.message?.content || '{}';
+  try {
+    const parsed = JSON.parse(stripCodeFences(raw));
+    return Array.isArray(parsed?.questions) ? parsed.questions : [];
+  } catch {
+    throw new InternalServerError('DeepSeek returned malformed JSON. Please try again.');
+  }
+};
+
+export interface QuizGenerationResult {
+  questions: any[];
+  requested: number;
+  /** Set when DeepSeek under-delivered even after one retry — surfaced to the admin instead of silently accepting fewer questions than asked for. */
+  shortfallWarning?: string;
+}
+
 export async function generateQuizQuestions(
   sourceText: string,
   customInstructions: string,
   counts: QuestionCountSpec[]
-): Promise<any[]> {
+): Promise<QuizGenerationResult> {
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) {
     throw new InternalServerError('AI quiz generation is not configured on this server (missing DEEPSEEK_API_KEY).');
@@ -328,56 +370,51 @@ Each element of "questions" must be one object matching EXACTLY the shape for it
 ${QUESTION_SHAPES}
 
 Generation rules:
-- Generate EXACTLY these counts, no more, no less (total ${totalRequested} questions):
+- Generate EXACTLY these counts, no more, no less (total ${totalRequested} questions) — this is a strict, non-negotiable requirement, not a target:
 ${countsList}
 - Every question must be answerable directly from the SOURCE MATERIAL provided by the user — do not invent facts, hadith, or Qur'an citations not present in or directly implied by it.
+- If the source material seems short for the requested count, DO NOT reduce the number of questions — instead vary the angle (different sentences, specific details, speakers, order of events, vocabulary, or rephrasing the same underlying fact from a different direction) so each question is still distinct and valid. Producing fewer questions than requested is a failure even if the material is thin.
 - Keep language clear, friendly, and age-appropriate.
 - Vary the specific facts/angles tested across questions of the same type so they don't repeat each other.${
     customInstructions?.trim() ? `\n- Additional instructions from the teacher: ${customInstructions.trim()}` : ''
   }`;
 
-  let response;
-  try {
-    response = await axios.post(
-      DEEPSEEK_API_URL,
+  const userContent = `SOURCE MATERIAL:\n\n${clipped}`;
+  let questions = await callDeepSeekForQuestions(apiKey, [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userContent },
+  ]);
+
+  // DeepSeek sometimes under-delivers on thin source material despite the
+  // "exactly N" instruction above — one retry, explicitly told the shortfall,
+  // recovers most of these without silently handing the admin fewer
+  // questions than they asked for.
+  if (questions.length < totalRequested) {
+    const missing = totalRequested - questions.length;
+    const retryQuestions = await callDeepSeekForQuestions(apiKey, [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userContent },
+      { role: 'assistant', content: JSON.stringify({ questions }) },
       {
-        model: 'deepseek-chat',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: `SOURCE MATERIAL:\n\n${clipped}` },
-        ],
-        temperature: 0.6,
-        max_tokens: 4000,
-        response_format: { type: 'json_object' },
+        role: 'user',
+        content: `You only returned ${questions.length} of the ${totalRequested} required questions. Generate ${missing} MORE question(s) to reach the exact required counts, covering whichever type(s) are still short. Vary the angle from the questions already generated above so nothing repeats. Return ONLY the ${missing} additional question(s) as {"questions": [...]}, not the full set again.`,
       },
-      {
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: 90_000,
-      }
-    );
-  } catch (err: any) {
-    const status = err.response?.status;
-    const detail = err.response?.data?.error?.message || err.message;
-    throw new InternalServerError(`DeepSeek request failed${status ? ` (${status})` : ''}: ${detail}`);
+    ]);
+    questions = [...questions, ...retryQuestions];
   }
 
-  const raw: string = response.data?.choices?.[0]?.message?.content || '{}';
-  let parsed: any;
-  try {
-    parsed = JSON.parse(stripCodeFences(raw));
-  } catch {
-    throw new InternalServerError('DeepSeek returned malformed JSON. Please try again.');
-  }
-
-  const questions = Array.isArray(parsed?.questions) ? parsed.questions : [];
   if (questions.length === 0) {
     throw new InternalServerError('DeepSeek did not return any questions. Please try again.');
   }
 
-  return questions.map((q: any) => normalizeAiQuestion(q));
+  const result: QuizGenerationResult = {
+    questions: questions.map((q: any) => normalizeAiQuestion(q)),
+    requested: totalRequested,
+  };
+  if (questions.length < totalRequested) {
+    result.shortfallWarning = `Only ${questions.length} of ${totalRequested} requested questions were generated — the source material may be too short for this many distinct questions. Try reducing the count or providing more content.`;
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------

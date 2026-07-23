@@ -85,6 +85,13 @@ export function StopCheckAiGeneratorModal({ isOpen, onClose, blockContent, onGen
         aiGenerated: true,
       }));
       onGenerated(generated);
+      if (data.data.shortfallWarning) {
+        // Still add what came back — this is a heads-up, not a failure — but
+        // don't silently close on it; the admin should notice the shortfall.
+        setError(data.data.shortfallWarning);
+        setGenerating(false);
+        return;
+      }
       onClose();
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to generate questions. Please try again.');
