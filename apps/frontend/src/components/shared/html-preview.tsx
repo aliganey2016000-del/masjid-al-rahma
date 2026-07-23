@@ -20,9 +20,29 @@
  * cookies, session data, or DOM.
  */
 
-import { useRef, useState, useMemo, useCallback } from 'react';
+import { useRef, useState, useMemo, useEffect } from 'react';
 import { sanitizeHtml } from '../../lib/sanitize-html';
 import { useTheme } from '../../store/theme-context';
+
+// Reports this document's own height to the parent via postMessage on every
+// load/resize/image-load. This has to run FROM INSIDE the iframe: the
+// sandbox intentionally omits `allow-same-origin` (so lesson scripts can
+// never reach the parent's cookies/session), which as a side effect makes
+// `iframe.contentDocument` unreadable from the parent — a resize-by-reading
+// approach from the outside can never work under that sandbox. postMessage
+// is the one channel sandboxed cross-origin iframes are still allowed to use.
+const RESIZE_REPORTER_SCRIPT = `<script>
+(function () {
+  function report() {
+    var h = document.documentElement.scrollHeight;
+    parent.postMessage({ type: 'lesson-content-resize', height: h }, '*');
+  }
+  if (window.ResizeObserver) { new ResizeObserver(report).observe(document.documentElement); }
+  window.addEventListener('load', report);
+  document.querySelectorAll('img').forEach(function (img) { img.addEventListener('load', report); });
+  report();
+})();
+</script>`;
 
 // ---------------------------------------------------------------------------
 // Detection helpers
@@ -100,16 +120,20 @@ function buildShellForFragment(bodyHtml: string, isDark: boolean): string {
     [dir="rtl"] { text-align: right; line-height: 1.9; }
   </style>
 </head>
-<body>${bodyHtml}</body>
+<body>${bodyHtml}${RESIZE_REPORTER_SCRIPT}</body>
 </html>`;
 }
 
 /**
- * For full HTML documents: pass through as-is after DOMPurify sanitization.
- * The document retains its own <!DOCTYPE>, <style>, <link>, and <script> tags.
+ * For full HTML documents: pass through as-is after DOMPurify sanitization,
+ * with the resize reporter appended before </body> (or at the very end if
+ * there's no closing tag to anchor on) so these also auto-size correctly.
  */
 function passThroughDocument(raw: string): string {
-  return sanitizeHtml(raw);
+  const sanitized = sanitizeHtml(raw);
+  return /<\/body>/i.test(sanitized)
+    ? sanitized.replace(/<\/body>/i, `${RESIZE_REPORTER_SCRIPT}</body>`)
+    : `${sanitized}${RESIZE_REPORTER_SCRIPT}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -150,49 +174,25 @@ function SandboxIframe({
   }, [html, isDark]);
 
   // Auto-resize the iframe to match its internal document height so the
-  // containing page doesn't get a double scrollbar.
-  const handleLoad = useCallback(() => {
-    const iframe = iframeRef.current;
-    if (!iframe?.contentDocument?.body) return;
-
-    const measure = () => {
-      const body = iframe.contentDocument?.body;
-      if (!body) return;
-      const h = body.scrollHeight;
-      if (h > 0) {
-        iframe.style.height = `${h}px`;
-        setIframeHeight(`${h}px`);
+  // containing page doesn't get a double scrollbar — the height comes from
+  // RESIZE_REPORTER_SCRIPT running INSIDE the iframe (see above): reading
+  // `iframe.contentDocument` from out here never works, since the sandbox
+  // deliberately omits `allow-same-origin`.
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      if (e.source !== iframeRef.current?.contentWindow) return;
+      if (e.data?.type === 'lesson-content-resize' && typeof e.data.height === 'number' && e.data.height > 0) {
+        setIframeHeight(`${e.data.height}px`);
       }
     };
-
-    // Initial measurement
-    measure();
-
-    // Re-measure on any layout change (images loading, font swaps, JS DOM
-    // mutations, CSS transitions finishing, etc.)
-    const observer = new ResizeObserver(() => measure());
-    observer.observe(iframe.contentDocument.body);
-
-    // Also listen for messages posted by embedded scripts that want to
-    // resize the iframe dynamically (e.g. an interactive exercise that
-    // expands/collapses sections). Scripts can call:
-    //   parent.postMessage({ type: 'resize' }, '*');
-    const onMessage = (e: MessageEvent) => {
-      if (e.data?.type === 'resize') measure();
-    };
     window.addEventListener('message', onMessage);
-
-    return () => {
-      observer.disconnect();
-      window.removeEventListener('message', onMessage);
-    };
+    return () => window.removeEventListener('message', onMessage);
   }, []);
 
   return (
     <iframe
       ref={iframeRef}
       srcDoc={srcDoc}
-      onLoad={handleLoad}
       title="Lesson Content"
       // allow-scripts enables interactive JS (matching games, audio
       // buttons, quizzes). We deliberately OMIT allow-same-origin and
