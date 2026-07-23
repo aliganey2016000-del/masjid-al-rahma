@@ -294,9 +294,10 @@ export const toggleLive = async (req: Request, res: Response): Promise<Response>
     throw new BadRequestError('isLive must be true or false');
   }
 
-  if (isLive && !course.meetingLink) {
-    throw new BadRequestError('Add a Google Meet link to this course before going live');
-  }
+  // No meetingLink required anymore — the live classroom is an embedded
+  // Jitsi room keyed off the course's own id (see frontend jitsi-room.tsx),
+  // not a stored external link. meetingLink is kept only for courses still
+  // using an external Google Meet link.
 
   course.isLive = isLive;
   await course.save();

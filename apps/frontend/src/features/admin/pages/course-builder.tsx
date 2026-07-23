@@ -13,6 +13,9 @@ import api from '../../../lib/axios';
 import { useCourseContent, useAutoSave, generateTempId } from './course-builder.api';
 import { AssignmentEditor } from './components/builder-assignment-editor';
 import { CourseContentImportModal } from './components/course-content-import-modal';
+import { JitsiCallModal } from '../../../components/shared/jitsi-call-modal';
+import { jitsiRoomName } from '../../../components/shared/jitsi-room';
+import { useAuth } from '../../../store/auth-context';
 import type {
   ChapterItem,
   CourseContent,
@@ -60,6 +63,7 @@ interface CourseBuilderProps {
 export function CourseBuilder({ basePath = '/admin' }: CourseBuilderProps) {
   const { courseId } = useParams<{ courseId: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const {
     content,
@@ -110,19 +114,17 @@ export function CourseBuilder({ basePath = '/admin' }: CourseBuilderProps) {
   };
 
   // -----------------------------------------------------------------------
-  // Live Session (Google Meet)
+  // Live Session (embedded Jitsi classroom)
   // -----------------------------------------------------------------------
-  const [meetingLink, setMeetingLink] = useState('');
   const [isLive, setIsLive] = useState(false);
-  const [savingMeetingLink, setSavingMeetingLink] = useState(false);
   const [togglingLive, setTogglingLive] = useState(false);
+  const [showLiveCall, setShowLiveCall] = useState(false);
 
   useEffect(() => {
     if (!courseId) return;
     (async () => {
       try {
         const { data } = await api.get(`/courses/${courseId}/admin`);
-        setMeetingLink(data.data?.meetingLink || '');
         setIsLive(!!data.data?.isLive);
       } catch {
         // Non-fatal — the rest of the builder still works without it.
@@ -130,29 +132,15 @@ export function CourseBuilder({ basePath = '/admin' }: CourseBuilderProps) {
     })();
   }, [courseId]);
 
-  const handleSaveMeetingLink = async () => {
-    setSavingMeetingLink(true);
-    try {
-      await api.patch(`/courses/${courseId}`, { meetingLink: meetingLink.trim() });
-      showToast('Meeting link saved', 'success');
-    } catch (err: any) {
-      showToast(err.response?.data?.message || 'Failed to save meeting link', 'error');
-    } finally {
-      setSavingMeetingLink(false);
-    }
-  };
-
   const handleToggleLive = async () => {
     const nextIsLive = !isLive;
-    if (nextIsLive && !meetingLink.trim()) {
-      showToast('Add a Google Meet link before going live', 'error');
-      return;
-    }
     setTogglingLive(true);
     try {
       await api.patch(`/courses/${courseId}/live`, { isLive: nextIsLive });
       setIsLive(nextIsLive);
       showToast(nextIsLive ? '🔴 Course is now live' : 'Live session ended', 'success');
+      if (nextIsLive) setShowLiveCall(true);
+      else setShowLiveCall(false);
     } catch (err: any) {
       showToast(err.response?.data?.message || 'Failed to update live status', 'error');
     } finally {
@@ -620,7 +608,7 @@ export function CourseBuilder({ basePath = '/admin' }: CourseBuilderProps) {
           />
         )}
 
-        {/* ── Live Session (Google Meet) ── */}
+        {/* ── Live Session (embedded Jitsi classroom) ── */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -645,37 +633,30 @@ export function CourseBuilder({ basePath = '/admin' }: CourseBuilderProps) {
               </button>
             </div>
           </div>
-          <div className="flex flex-col sm:flex-row gap-2">
-            <input
-              type="url"
-              value={meetingLink}
-              onChange={(e) => setMeetingLink(e.target.value)}
-              placeholder="https://meet.google.com/xxx-xxxx-xxx"
-              className="flex-1 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-primary)] px-3 py-2 text-sm"
-            />
+          {isLive ? (
             <button
               type="button"
-              onClick={handleSaveMeetingLink}
-              disabled={savingMeetingLink}
-              className="rounded-xl border border-[var(--color-border-default)] px-4 py-2 text-sm font-medium hover:bg-[var(--color-surface-tertiary)] transition-colors disabled:opacity-50"
+              onClick={() => setShowLiveCall(true)}
+              className="rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-700 transition-colors"
             >
-              {savingMeetingLink ? 'Saving...' : 'Save Link'}
+              🎥 Enter Live Classroom
             </button>
-            {meetingLink && (
-              <a
-                href={meetingLink}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white text-center hover:bg-primary-700 transition-colors"
-              >
-                Open Meet ↗
-              </a>
-            )}
-          </div>
-          <p className="text-xs text-[var(--color-text-tertiary)] mt-2">
-            Paste a Google Meet link, then toggle "Live" when the session starts — students and admin will see a "Join Live" button on this course.
-          </p>
+          ) : (
+            <p className="text-xs text-[var(--color-text-tertiary)]">
+              Toggle "Live" to start the class — students will see a "Join Live" button on this course, and the video classroom opens right here on the platform (no external app or link).
+            </p>
+          )}
         </motion.div>
+
+        {showLiveCall && courseId && (
+          <JitsiCallModal
+            roomName={jitsiRoomName(courseId)}
+            displayName={user?.email || 'Teacher'}
+            isModerator
+            title="Live Classroom"
+            onClose={() => setShowLiveCall(false)}
+          />
+        )}
 
         {/* ── Stats Cards ── */}
         <motion.div

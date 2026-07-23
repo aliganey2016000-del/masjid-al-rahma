@@ -19,6 +19,9 @@ import { QuestionPreview } from '../../../components/shared/quiz-question-previe
 import { HtmlPreview } from '../../../components/shared/html-preview';
 import { InteractiveGateLessonView } from '../components/interactive-gate-lesson-view';
 import { useOnlineStatus } from '../../shared/hooks/useOnlineStatus';
+import { useAuth } from '../../../store/auth-context';
+import { JitsiCallModal } from '../../../components/shared/jitsi-call-modal';
+import { jitsiRoomName } from '../../../components/shared/jitsi-room';
 import { getDownloadedCourse, queueAction } from '../../../lib/offline-store';
 import { sanitizeHtml } from '../../../lib/sanitize-html';
 
@@ -136,6 +139,8 @@ export function StudentCourseLearn() {
   const { t, i18n } = useTranslation('common');
   const lang = i18n.language as 'en' | 'so' | 'ar';
   const isOnline = useOnlineStatus();
+  const { user } = useAuth();
+  const [showLiveCall, setShowLiveCall] = useState(false);
 
   // Data
   const [course, setCourse] = useState<EnrolledCourse | null>(null);
@@ -455,17 +460,26 @@ export function StudentCourseLearn() {
         </svg>
       </button>
 
-      {/* ── Join Live (Google Meet) — shown whenever the teacher has gone live ── */}
-      {course?.isLive && course.meetingLink && (
-        <a
-          href={course.meetingLink}
-          target="_blank"
-          rel="noopener noreferrer"
+      {/* ── Join Live — embedded Jitsi classroom, shown whenever the teacher has gone live ── */}
+      {course?.isLive && (
+        <button
+          type="button"
+          onClick={() => setShowLiveCall(true)}
           className="fixed top-3 end-3 z-[60] flex items-center gap-1.5 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg hover:bg-red-700 transition-colors animate-pulse"
         >
           <span className="h-2 w-2 rounded-full bg-white" />
-          Join Live ↗
-        </a>
+          Join Live
+        </button>
+      )}
+
+      {showLiveCall && courseId && (
+        <JitsiCallModal
+          roomName={jitsiRoomName(courseId)}
+          displayName={user?.email || 'Student'}
+          isModerator={false}
+          title="Live Classroom"
+          onClose={() => setShowLiveCall(false)}
+        />
       )}
 
       {/* ── Offline banner ── */}
