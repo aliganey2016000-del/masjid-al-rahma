@@ -580,9 +580,17 @@ export function StudentCourseLearn() {
                 transition={{ type: 'spring', damping: 25, stiffness: 250 }}
                 className="fixed top-0 left-0 z-50 w-[85vw] max-w-sm h-full bg-[var(--color-surface-primary)] shadow-2xl lg:hidden flex flex-col"
               >
-                <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border-default)]">
-                  <h3 className="text-sm font-bold text-[var(--color-text-primary)]">📑 {t('course_progress')}</h3>
-                  <button onClick={() => setDrawerOpen(false)} className="h-8 w-8 flex items-center justify-center rounded-lg text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-tertiary)] transition-colors">✕</button>
+                <div className="px-4 py-3 border-b border-[var(--color-border-default)]">
+                  <button
+                    onClick={() => navigate('/student/courses')}
+                    className="text-xs text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] transition-colors mb-2"
+                  >
+                    ← {t('my_courses')}
+                  </button>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-[var(--color-text-primary)]">📑 {t('course_progress')}</h3>
+                    <button onClick={() => setDrawerOpen(false)} className="h-8 w-8 flex items-center justify-center rounded-lg text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-tertiary)] transition-colors">✕</button>
+                  </div>
                 </div>
                 <div className="flex-1 overflow-y-auto">
                   {/* Mobile drawer content — simplified */}
