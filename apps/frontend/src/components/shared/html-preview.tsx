@@ -22,6 +22,7 @@
 
 import { useRef, useState, useMemo, useCallback } from 'react';
 import { sanitizeHtml } from '../../lib/sanitize-html';
+import { useTheme } from '../../store/theme-context';
 
 // ---------------------------------------------------------------------------
 // Detection helpers
@@ -50,17 +51,26 @@ export function hasScripts(html: string): boolean {
  * with base resets and light/dark mode support via CSS custom properties.
  * The author's own <style> blocks (if any) will override these base rules.
  */
-function buildShellForFragment(bodyHtml: string): string {
+function buildShellForFragment(bodyHtml: string, isDark: boolean): string {
+  // Colors are baked in directly from the HOST app's actual theme (the
+  // `dark` class on <html>, via useTheme()) rather than a
+  // `@media (prefers-color-scheme)` query — that query reflects the OS
+  // setting, which is a completely different, often-mismatched thing once
+  // a user has explicitly picked a theme in-app (e.g. OS in dark mode,
+  // app manually set to light) — the iframe would otherwise render the
+  // opposite of the page around it.
+  const textColor = isDark ? '#f1f5f9' : '#0f172a';
+  const bgColor = isDark ? '#0f172a' : '#ffffff';
+  const codeBg = isDark ? '#1e293b' : '#f1f5f9';
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
-    /* Base reset. The lesson's own <style> blocks / CSS classes override
-       these rules. Light & dark variants respond to prefers-color-scheme
-       so the iframe feels native without any Tailwind leakage. */
-    :root { color-scheme: light; }
+    /* Base reset. The lesson's own <style> blocks / CSS classes override these rules. */
+    :root { color-scheme: ${isDark ? 'dark' : 'light'}; }
     *, *::before, *::after { box-sizing: border-box; }
     body {
       margin: 0;
@@ -68,15 +78,9 @@ function buildShellForFragment(bodyHtml: string): string {
       font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
       font-size: 14px;
       line-height: 1.7;
-      color: #0f172a;
-      background: #ffffff;
+      color: ${textColor};
+      background: ${bgColor};
     }
-    ${'@media (prefers-color-scheme: dark) {'}
-      body {
-        color: #f1f5f9;
-        background: #0f172a;
-      }
-    ${'}'}
     h1, h2, h3, h4, h5, h6 { margin: 0 0 0.5em 0; }
     p { margin: 0 0 0.75em 0; line-height: 1.65; }
     ul, ol { padding-left: 1.25rem; margin: 0 0 0.75em 0; }
@@ -88,7 +92,7 @@ function buildShellForFragment(bodyHtml: string): string {
     pre, code {
       font-family: 'JetBrains Mono', 'Fira Code', monospace;
       font-size: 0.75rem;
-      background: #f1f5f9;
+      background: ${codeBg};
       border-radius: 0.375rem;
       padding: 0.125rem 0.375rem;
     }
@@ -134,6 +138,7 @@ function SandboxIframe({
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [iframeHeight, setIframeHeight] = useState<string>('auto');
+  const { isDark } = useTheme();
 
   const srcDoc = useMemo(() => {
     if (isFullDocument(html)) {
@@ -141,8 +146,8 @@ function SandboxIframe({
     }
     // Fragment — wrap in a minimal shell
     const sanitized = sanitizeHtml(html);
-    return buildShellForFragment(sanitized);
-  }, [html]);
+    return buildShellForFragment(sanitized, isDark);
+  }, [html, isDark]);
 
   // Auto-resize the iframe to match its internal document height so the
   // containing page doesn't get a double scrollbar.
