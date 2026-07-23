@@ -12,6 +12,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../../lib/axios';
 import { useCourseContent, useAutoSave, generateTempId } from './course-builder.api';
 import { AssignmentEditor } from './components/builder-assignment-editor';
+import { CourseContentImportModal } from './components/course-content-import-modal';
 import type {
   ChapterItem,
   CourseContent,
@@ -99,6 +100,9 @@ export function CourseBuilder({ basePath = '/admin' }: CourseBuilderProps) {
 
   // Notification toast
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  // Bulk import (Chapters + Lessons via Excel/paste)
+  const [showImportModal, setShowImportModal] = useState(false);
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     setToast({ message, type });
@@ -557,6 +561,13 @@ export function CourseBuilder({ basePath = '/admin' }: CourseBuilderProps) {
             </span>
 
             <button
+              onClick={() => setShowImportModal(true)}
+              className="rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-primary)] px-4 py-2 text-sm font-medium hover:bg-[var(--color-surface-tertiary)] transition-colors"
+            >
+              ↑ Import Content
+            </button>
+
+            <button
               onClick={handleManualSave}
               disabled={saving}
               className="rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-primary)] px-4 py-2 text-sm font-medium hover:bg-[var(--color-surface-tertiary)] transition-colors disabled:opacity-50"
@@ -565,6 +576,14 @@ export function CourseBuilder({ basePath = '/admin' }: CourseBuilderProps) {
             </button>
           </div>
         </motion.div>
+
+        {showImportModal && (
+          <CourseContentImportModal
+            courseId={courseId!}
+            onClose={() => setShowImportModal(false)}
+            onImported={() => { fetchContent(); showToast('Course content imported successfully', 'success'); }}
+          />
+        )}
 
         {/* ── Live Session (Google Meet) ── */}
         <motion.div

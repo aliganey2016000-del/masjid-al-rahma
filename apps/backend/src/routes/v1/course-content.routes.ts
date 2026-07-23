@@ -3,10 +3,16 @@
  */
 
 import { Router } from 'express';
+import multer from 'multer';
 import * as contentController from '../../controllers/course-content.controller';
 import { authMiddleware } from '../../middleware/auth.middleware';
 import { adminOrTeacher } from '../../middleware/role.middleware';
 import { asyncHandler } from '../../middleware/async-handler.middleware';
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
 
 const router = Router({ mergeParams: true });
 
@@ -31,5 +37,11 @@ router.patch('/chapters/:chapterId/items/reorder', asyncHandler(contentControlle
 
 // PATCH /api/v1/courses/:courseId/content/chapters/:chapterId/collapse
 router.patch('/chapters/:chapterId/collapse', asyncHandler(contentController.toggleChapterCollapse));
+
+// GET /api/v1/courses/:courseId/content/template — download the import template
+router.get('/template', asyncHandler(contentController.downloadImportTemplate as any));
+
+// POST /api/v1/courses/:courseId/content/import — bulk import chapters + lessons
+router.post('/import', upload.single('file'), asyncHandler(contentController.importContent));
 
 export default router;

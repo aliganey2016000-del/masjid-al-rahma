@@ -6,12 +6,16 @@
  */
 
 import crypto from 'crypto';
+import mongoose from 'mongoose';
 import { Request, Response } from 'express';
+import * as XLSX from 'xlsx';
+import { marked } from 'marked';
 import CourseContent from '../models/course-content.model';
 import Course from '../models/course.model';
-import { NotFoundError } from '../utils/api-error';
+import { BadRequestError, NotFoundError } from '../utils/api-error';
 import ApiResponse from '../utils/api-response';
 import { assertOwnsOrg } from '../utils/tenant-scope';
+import { buildXlsxBuffer } from '../utils/xlsx-buffer';
 
 /**
  * SHA-256 of a gate answer, salted per-question by lesson id + scope + index.
@@ -320,4 +324,157 @@ export const toggleChapterCollapse = async (req: Request, res: Response): Promis
 
   const updated = await CourseContent.findOne({ course: courseId }).lean();
   return ApiResponse.success(res, updated);
+};
+
+// ---------------------------------------------------------------------------
+// Bulk import — Chapters (Units) + Lessons from Excel/CSV
+// One row per lesson; rows sharing a Chapter Title are grouped into one
+// chapter (matched case-insensitively against chapters that already exist,
+// otherwise created new) and appended in row order. Writes directly to the
+// DB (unlike the drag-and-drop builder's own Save, which replaces the whole
+// `chapters` array) — the frontend refetches content after a successful
+// import so its local state picks up the result before any further autosave.
+// ---------------------------------------------------------------------------
+
+const IMPORT_HEADER_TITLES = new Set(['chapter title', 'lesson title', 'duration', 'duration (minutes)', 'content']);
+
+function looksLikeHeaderRow(cellValues: string[]): boolean {
+  const matches = cellValues.filter((v) => IMPORT_HEADER_TITLES.has(v.toLowerCase())).length;
+  return matches >= 2;
+}
+
+function getField(row: Record<string, any>, ...names: string[]): unknown {
+  const keys = Object.keys(row);
+  for (const name of names) {
+    const key = keys.find((k) => k.trim().toLowerCase() === name.toLowerCase());
+    if (key !== undefined) return row[key];
+  }
+  return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// GET /courses/:courseId/content/template — Download import template (XLSX)
+// ---------------------------------------------------------------------------
+export const downloadImportTemplate = async (_req: Request, res: Response): Promise<void> => {
+  const headers = ['Chapter Title', 'Lesson Title', 'Duration (minutes)', 'Content (optional — plain text or Markdown)'];
+  const rows = [
+    ['Unit 1: Greetings', "Lesson 1: What's your name?", '30', 'Say hello and make introductions.\n\n# Practice\nSay your name, then ask a partner theirs.'],
+    ['Unit 1: Greetings', 'Lesson 2: Nice to meet you', '30', ''],
+    ['Unit 2: Family', 'Lesson 1: This is my family', '30', ''],
+  ];
+  const buffer = buildXlsxBuffer(headers, rows, 'Course Content Template');
+
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument/spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename=course-content-template.xlsx');
+  res.end(buffer);
+};
+
+// ---------------------------------------------------------------------------
+// POST /courses/:courseId/content/import — Bulk import chapters + lessons
+// ---------------------------------------------------------------------------
+export const importContent = async (req: Request, res: Response): Promise<Response> => {
+  const { courseId } = req.params;
+
+  const course = await Course.findById(courseId);
+  if (!course) throw new NotFoundError('Course');
+  assertOwnsOrg(req, course, 'school');
+
+  if (!req.file) throw new BadRequestError('An Excel or CSV file is required (field name "file")');
+
+  const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) throw new BadRequestError('The uploaded file has no sheets');
+
+  const rows = XLSX.utils.sheet_to_json<Record<string, any>>(workbook.Sheets[sheetName], { defval: '' });
+  if (rows.length === 0) throw new BadRequestError('The uploaded file has no data rows');
+
+  const errors: { row: number; message: string }[] = [];
+  const groups = new Map<string, { title: string; lessons: { title: string; content: string; duration: number }[] }>();
+
+  for (let i = 0; i < rows.length; i++) {
+    const rowNum = i + 2; // +1 for 0-index, +1 for the header row already stripped by sheet_to_json
+    const row = rows[i];
+
+    const cellValues = Object.values(row).map((v) => String(v ?? '').trim());
+    if (cellValues.every((v) => v === '')) continue; // blank row
+    if (looksLikeHeaderRow(cellValues)) continue; // a re-pasted header row further down the batch
+
+    const chapterTitle = String(getField(row, 'Chapter Title') ?? '').trim();
+    const lessonTitle = String(getField(row, 'Lesson Title') ?? '').trim();
+    if (!chapterTitle || !lessonTitle) {
+      errors.push({ row: rowNum, message: 'Chapter Title and Lesson Title are both required' });
+      continue;
+    }
+
+    const durationRaw = getField(row, 'Duration (minutes)', 'Duration');
+    const duration = Number(durationRaw) || 0;
+    const contentRaw = String(getField(row, 'Content') ?? '').trim();
+    const content = contentRaw ? (marked.parse(contentRaw, { async: false }) as string) : '';
+
+    const key = chapterTitle.toLowerCase();
+    if (!groups.has(key)) groups.set(key, { title: chapterTitle, lessons: [] });
+    groups.get(key)!.lessons.push({ title: lessonTitle, content, duration });
+  }
+
+  if (groups.size === 0) {
+    throw new BadRequestError('No valid rows found to import — every row was missing a Chapter Title or Lesson Title.');
+  }
+
+  let doc = await CourseContent.findOne({ course: courseId });
+  if (!doc) {
+    doc = new CourseContent({ course: courseId, chapters: [] });
+  }
+
+  let chaptersCreated = 0;
+  let chaptersUpdated = 0;
+  let lessonsCreated = 0;
+
+  for (const group of groups.values()) {
+    let chapter: any = doc.chapters.find((ch: any) => String(ch.title || '').trim().toLowerCase() === group.title.toLowerCase());
+    if (!chapter) {
+      chapter = {
+        _id: new mongoose.Types.ObjectId(),
+        title: group.title,
+        description: '',
+        order: doc.chapters.length,
+        status: 'draft',
+        collapsed: false,
+        items: [],
+      } as any;
+      doc.chapters.push(chapter);
+      chaptersCreated++;
+    } else {
+      chaptersUpdated++;
+    }
+
+    const baseOrder = chapter.items.length;
+    group.lessons.forEach((lesson, idx) => {
+      chapter.items.push({
+        _id: new mongoose.Types.ObjectId(),
+        title: lesson.title,
+        type: 'lesson',
+        content: lesson.content,
+        videoUrl: '',
+        videoDuration: 0,
+        featuredImage: '',
+        attachments: [],
+        order: baseOrder + idx,
+        status: 'draft',
+        duration: lesson.duration,
+        deliveryMode: 'traditional',
+      } as any);
+      lessonsCreated++;
+    });
+  }
+
+  doc.markModified('chapters');
+  await doc.save();
+
+  return ApiResponse.success(res, {
+    totalRows: rows.length,
+    chaptersCreated,
+    chaptersUpdated,
+    lessonsCreated,
+    errors,
+  }, 'Course content imported successfully');
 };
