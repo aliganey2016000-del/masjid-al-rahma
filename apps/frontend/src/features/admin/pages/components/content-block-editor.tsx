@@ -9,7 +9,7 @@
  * attachments/quiz questions elsewhere in the Course Builder.
  */
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ArrowUp, ArrowDown, Trash2, PenLine, Sparkles, Loader2, CheckCircle2,
   RefreshCw, Pencil, Plus, X, AlertCircle, CircleCheck,
@@ -197,6 +197,25 @@ function QuestionBuilder({
   const [aiDraft, setAiDraft] = useState<ContentBlockQuestion | null>(null);
   const [aiError, setAiError] = useState('');
   const [editingCommitted, setEditingCommitted] = useState(false);
+
+  // "Remove question" clears `question` in the parent, but this component's
+  // own `questionMode` ('manual'/'ai') is local state that otherwise never
+  // resets — leaving it stuck on the old mode falls through every branch
+  // below into `return null`, hiding the Add Manually/AI Generator picker.
+  // A defined→undefined transition can only come from that external Remove
+  // (the AI flow never itself clears an already-committed question), so
+  // resetting here is safe.
+  const prevQuestionRef = useRef(question);
+  useEffect(() => {
+    if (prevQuestionRef.current && !question) {
+      setQuestionMode(null);
+      setAiPhase('idle');
+      setAiDraft(null);
+      setAiError('');
+      setEditingCommitted(false);
+    }
+    prevQuestionRef.current = question;
+  }, [question]);
 
   const hasBlockText = plainText(blockContent).length > 0;
 
