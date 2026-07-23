@@ -336,7 +336,10 @@ export const toggleChapterCollapse = async (req: Request, res: Response): Promis
 // import so its local state picks up the result before any further autosave.
 // ---------------------------------------------------------------------------
 
-const IMPORT_HEADER_TITLES = new Set(['chapter title', 'lesson title', 'duration', 'duration (minutes)', 'content']);
+const IMPORT_HEADER_TITLES = new Set([
+  'chapter title', 'lesson title', 'duration', 'duration (minutes)', 'content',
+  'video url', 'featured image url',
+]);
 
 function looksLikeHeaderRow(cellValues: string[]): boolean {
   const matches = cellValues.filter((v) => IMPORT_HEADER_TITLES.has(v.toLowerCase())).length;
@@ -356,11 +359,15 @@ function getField(row: Record<string, any>, ...names: string[]): unknown {
 // GET /courses/:courseId/content/template — Download import template (XLSX)
 // ---------------------------------------------------------------------------
 export const downloadImportTemplate = async (_req: Request, res: Response): Promise<void> => {
-  const headers = ['Chapter Title', 'Lesson Title', 'Duration (minutes)', 'Content (optional — plain text or Markdown)'];
+  const headers = [
+    'Chapter Title', 'Lesson Title', 'Duration (minutes)',
+    'Content (optional — plain text or Markdown)',
+    'Video URL (optional)', 'Featured Image URL (optional)',
+  ];
   const rows = [
-    ['Unit 1: Greetings', "Lesson 1: What's your name?", '30', 'Say hello and make introductions.\n\n# Practice\nSay your name, then ask a partner theirs.'],
-    ['Unit 1: Greetings', 'Lesson 2: Nice to meet you', '30', ''],
-    ['Unit 2: Family', 'Lesson 1: This is my family', '30', ''],
+    ['Unit 1: Greetings', "Lesson 1: What's your name?", '30', 'Say hello and make introductions.\n\n# Practice\nSay your name, then ask a partner theirs.', 'https://youtube.com/watch?v=...', ''],
+    ['Unit 1: Greetings', 'Lesson 2: Nice to meet you', '30', '', '', ''],
+    ['Unit 2: Family', 'Lesson 1: This is my family', '30', '', '', ''],
   ];
   const buffer = buildXlsxBuffer(headers, rows, 'Course Content Template');
 
@@ -389,7 +396,7 @@ export const importContent = async (req: Request, res: Response): Promise<Respon
   if (rows.length === 0) throw new BadRequestError('The uploaded file has no data rows');
 
   const errors: { row: number; message: string }[] = [];
-  const groups = new Map<string, { title: string; lessons: { title: string; content: string; duration: number }[] }>();
+  const groups = new Map<string, { title: string; lessons: { title: string; content: string; duration: number; videoUrl: string; featuredImage: string }[] }>();
 
   for (let i = 0; i < rows.length; i++) {
     const rowNum = i + 2; // +1 for 0-index, +1 for the header row already stripped by sheet_to_json
@@ -410,10 +417,12 @@ export const importContent = async (req: Request, res: Response): Promise<Respon
     const duration = Number(durationRaw) || 0;
     const contentRaw = String(getField(row, 'Content') ?? '').trim();
     const content = contentRaw ? (marked.parse(contentRaw, { async: false }) as string) : '';
+    const videoUrl = String(getField(row, 'Video URL', 'Video URL (optional)') ?? '').trim();
+    const featuredImage = String(getField(row, 'Featured Image URL', 'Featured Image URL (optional)') ?? '').trim();
 
     const key = chapterTitle.toLowerCase();
     if (!groups.has(key)) groups.set(key, { title: chapterTitle, lessons: [] });
-    groups.get(key)!.lessons.push({ title: lessonTitle, content, duration });
+    groups.get(key)!.lessons.push({ title: lessonTitle, content, duration, videoUrl, featuredImage });
   }
 
   if (groups.size === 0) {
@@ -437,9 +446,9 @@ export const importContent = async (req: Request, res: Response): Promise<Respon
       title: lesson.title,
       type: 'lesson',
       content: lesson.content,
-      videoUrl: '',
+      videoUrl: lesson.videoUrl,
       videoDuration: 0,
-      featuredImage: '',
+      featuredImage: lesson.featuredImage,
       attachments: [],
       order: baseOrder + idx,
       status: 'draft',

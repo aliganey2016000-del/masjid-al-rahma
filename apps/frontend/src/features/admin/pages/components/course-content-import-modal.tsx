@@ -198,13 +198,13 @@ export function CourseContentImportModal({ courseId, onClose, onImported }: Cour
               <div className="rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-secondary)] p-4">
                 <p className="text-xs font-semibold text-[var(--color-text-secondary)] mb-2">Paste your spreadsheet data below (tab-separated columns, one row per line):</p>
                 <p className="text-xs text-[var(--color-text-tertiary)] mb-3 font-mono">
-                  Chapter Title &nbsp; Lesson Title &nbsp; Duration (minutes) &nbsp; Content <span className="italic">(Content is optional — plain text or Markdown, converted automatically)</span>
+                  Chapter Title &nbsp; Lesson Title &nbsp; Duration (minutes) &nbsp; Content &nbsp; Video URL &nbsp; Featured Image URL <span className="italic">(Content, Video URL, and Featured Image URL are all optional — Content accepts plain text or Markdown, converted automatically)</span>
                 </p>
                 <textarea
                   value={pasteText}
                   onChange={(e) => { setPasteText(e.target.value); setPasteError(''); }}
                   rows={8}
-                  placeholder={"Paste data from Excel here...\n\nExample:\nUnit 1: Greetings\tWhat's your name?\t30\tSay hello and make introductions.\nUnit 1: Greetings\tNice to meet you\t30\t\nUnit 2: Family\tThis is my family\t30\t"}
+                  placeholder={"Paste data from Excel here...\n\nExample:\nUnit 1: Greetings\tWhat's your name?\t30\tSay hello and make introductions.\thttps://youtube.com/watch?v=...\t\nUnit 1: Greetings\tNice to meet you\t30\t\t\t\nUnit 2: Family\tThis is my family\t30\t\t\t"}
                   className="w-full rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-primary)] px-3 py-2.5 text-xs font-mono text-[var(--color-text-primary)] placeholder-[var(--color-text-tertiary)] focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20 resize-y"
                 />
               </div>
