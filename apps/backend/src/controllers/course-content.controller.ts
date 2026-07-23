@@ -349,7 +349,12 @@ function looksLikeHeaderRow(cellValues: string[]): boolean {
 function getField(row: Record<string, any>, ...names: string[]): unknown {
   const keys = Object.keys(row);
   for (const name of names) {
-    const key = keys.find((k) => k.trim().toLowerCase() === name.toLowerCase());
+    const target = name.toLowerCase();
+    // Exact match first, then a starts-with fallback — the template's own
+    // headers carry descriptive suffixes (e.g. "Content (optional — plain
+    // text or Markdown)"), which a plain equality check against the short
+    // name alone ("Content") would never match.
+    const key = keys.find((k) => k.trim().toLowerCase() === target) ?? keys.find((k) => k.trim().toLowerCase().startsWith(target));
     if (key !== undefined) return row[key];
   }
   return undefined;
@@ -415,7 +420,7 @@ export const importContent = async (req: Request, res: Response): Promise<Respon
 
     const durationRaw = getField(row, 'Duration (minutes)', 'Duration');
     const duration = Number(durationRaw) || 0;
-    const contentRaw = String(getField(row, 'Content') ?? '').trim();
+    const contentRaw = String(getField(row, 'Content', 'Content (optional — plain text or Markdown)') ?? '').trim();
     const content = contentRaw ? (marked.parse(contentRaw, { async: false }) as string) : '';
     const videoUrl = String(getField(row, 'Video URL', 'Video URL (optional)') ?? '').trim();
     const featuredImage = String(getField(row, 'Featured Image URL', 'Featured Image URL (optional)') ?? '').trim();
