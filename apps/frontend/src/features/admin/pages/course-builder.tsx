@@ -184,14 +184,25 @@ export function CourseBuilder({ basePath = '/admin' }: CourseBuilderProps) {
     setAddingChapter(false);
   };
 
-  const handleDeleteChapter = (chapterIdx: number) => {
+  const handleDeleteChapter = async (chapterIdx: number) => {
+    if (!content) return;
     if (!window.confirm('Delete this module and all its content?')) return;
-    updateContentLocally((prev) => ({
-      ...prev,
-      chapters: prev.chapters
+    // Delete reads as a final, committed action (it's behind a confirm
+    // dialog) — persist immediately rather than leaving it to the 4s
+    // autosave debounce, otherwise a refresh before that timer fires
+    // resurrects the "deleted" module from the still-unchanged server copy.
+    const newContent: CourseContent = {
+      ...content,
+      chapters: content.chapters
         .filter((_, i) => i !== chapterIdx)
         .map((ch, i) => ({ ...ch, order: i })),
-    }));
+    };
+    updateContentLocally(() => newContent);
+    try {
+      await saveContent(newContent);
+    } catch {
+      showToast('Failed to delete — please try again.', 'error');
+    }
   };
 
   const handleUpdateChapterTitle = (chapterIdx: number) => {
@@ -281,17 +292,27 @@ export function CourseBuilder({ basePath = '/admin' }: CourseBuilderProps) {
     }
   };
 
-  const handleDeleteItem = (chapterIdx: number, itemIdx: number) => {
+  const handleDeleteItem = async (chapterIdx: number, itemIdx: number) => {
+    if (!content) return;
     if (!window.confirm('Delete this item?')) return;
-    updateContentLocally((prev) => ({
-      ...prev,
-      chapters: prev.chapters.map((ch, i) =>
+    // Same reasoning as handleDeleteChapter — persist immediately instead of
+    // trusting the autosave debounce, so a refresh right after confirming
+    // can't bring the "deleted" item back from the still-unchanged server copy.
+    const newContent: CourseContent = {
+      ...content,
+      chapters: content.chapters.map((ch, i) =>
         i === chapterIdx
           ? { ...ch, items: ch.items.filter((_, j) => j !== itemIdx).map((it, j) => ({ ...it, order: j })) }
           : ch,
       ),
-    }));
+    };
+    updateContentLocally(() => newContent);
     setEditingItem(null);
+    try {
+      await saveContent(newContent);
+    } catch {
+      showToast('Failed to delete — please try again.', 'error');
+    }
   };
 
   const handleSaveItem = (chapterIdx: number, itemIdx: number, updatedItem: ChapterItem) => {
